@@ -49,7 +49,8 @@ body { background-color: var(--bg-main); color: var(--text-main); display: flex;
 .app-container { width: 100%; max-width: 480px; min-height: 100vh; padding: 20px; padding-bottom: 100px; }
 
 header { text-align: center; margin-bottom: 25px; position: relative; }
-.beranda-header { display: flex; justify-content: center; align-items: center; }
+.beranda-header, .matkul-header { display: flex; justify-content: center; align-items: center; }
+
 .drawer-trigger-btn {
     position: absolute;
     left: 0;
@@ -65,9 +66,28 @@ header { text-align: center; margin-bottom: 25px; position: relative; }
     justify-content: center;
     cursor: pointer;
     box-shadow: 0 2px 6px rgba(45, 42, 38, 0.04);
-    transition: transform 0.15s ease, background-color 0.15s ease;
+    transition: transform 0.15s ease;
 }
 .drawer-trigger-btn:active { transform: scale(0.92); }
+
+.semester-trigger-btn {
+    position: absolute;
+    right: 0;
+    top: 4px;
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    border: 1px solid var(--border-line);
+    background-color: var(--bg-card);
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(45, 42, 38, 0.04);
+    transition: transform 0.15s ease;
+}
+.semester-trigger-btn:active { transform: scale(0.92); }
 
 .brand-title { font-family: var(--font-logo); font-size: 32px; font-weight: 400; margin-bottom: 5px; color: var(--text-main); letter-spacing: 0.5px; line-height: 1; }
 .brand-dot { font-family: var(--font-logo); color: var(--btn-primary); }
@@ -80,54 +100,51 @@ header p { color: var(--text-muted); font-size: 14px; font-weight: 500; margin-t
 .section-title { font-size: 16px; font-weight: 700; margin-bottom: 12px; color: var(--text-main); }
 .svg-icon { vertical-align: text-bottom; width: 14px; height: 14px; margin-right: 4px; }
 
-/* --- PANEL GESER KIRI (GEMINI-STYLE DRAWER) --- */
-.drawer-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(45, 42, 38, 0.35);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity 0.28s ease, visibility 0.28s ease;
-    z-index: 25;
-}
-.drawer-backdrop.show {
-    opacity: 1;
-    visibility: visible;
-}
-
-.side-drawer {
+/* --- HALAMAN GESER FULL-SCREEN (KIRI & KANAN) --- */
+.side-drawer,
+.right-drawer {
     position: fixed;
     top: 0;
-    left: 0;
-    width: 85%;
-    max-width: 340px;
+    left: 50%;
+    width: 100%;
+    max-width: 480px;
     height: 100dvh;
     background-color: var(--bg-main);
-    border-right: 1px solid var(--border-line);
-    box-shadow: 8px 0 28px rgba(45, 42, 38, 0.16);
-    transform: translateX(-100%);
-    transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+    transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1), visibility 0.32s ease;
     z-index: 26;
     display: flex;
     flex-direction: column;
-    padding: 20px 18px;
+    padding: 20px;
+    visibility: hidden;
+}
+
+.side-drawer {
+    transform: translate(-150%, 0);
 }
 .side-drawer.open {
-    transform: translateX(0);
+    transform: translate(-50%, 0);
+    visibility: visible;
+}
+
+.right-drawer {
+    transform: translate(50%, 0);
+}
+.right-drawer.open {
+    transform: translate(-50%, 0);
+    visibility: visible;
 }
 
 .drawer-header {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
+    align-items: center;
     padding-bottom: 14px;
     border-bottom: 1px solid var(--border-line);
+    flex-shrink: 0;
 }
 .drawer-brand {
     font-family: var(--font-logo);
-    font-size: 24px;
+    font-size: 26px;
     font-weight: 400;
     line-height: 1;
     color: var(--text-main);
@@ -136,15 +153,15 @@ header p { color: var(--text-muted); font-size: 14px; font-weight: 500; margin-t
     display: block;
     font-size: 12px;
     color: var(--text-muted);
-    font-weight: 500;
+    font-weight: 600;
     margin-top: 4px;
 }
 .drawer-close-btn {
     background: var(--bg-card);
     border: 1px solid var(--border-line);
-    color: var(--text-muted);
-    width: 34px;
-    height: 34px;
+    color: var(--text-main);
+    width: 38px;
+    height: 38px;
     border-radius: 10px;
     display: flex;
     align-items: center;
@@ -153,108 +170,124 @@ header p { color: var(--text-muted); font-size: 14px; font-weight: 500; margin-t
 }
 .drawer-close-btn:active { transform: scale(0.92); }
 
-.drawer-tabs {
-    display: flex;
-    gap: 6px;
-    margin-top: 14px;
-    background: var(--bg-card);
-    padding: 4px;
-    border-radius: 10px;
-    border: 1px solid var(--border-line);
-}
-.drawer-tab {
-    flex: 1;
-    background: transparent;
-    border: none;
-    padding: 8px 6px;
-    border-radius: 7px;
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: background-color 0.2s ease, color 0.2s ease;
-}
-.drawer-tab.active {
-    background-color: var(--text-main);
-    color: #FFFFFF;
-}
-
-.drawer-toolbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 16px;
-    margin-bottom: 10px;
-}
-.drawer-toolbar span {
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-}
-.drawer-add-btn {
-    background: transparent;
-    border: 1px solid var(--btn-primary);
-    color: var(--btn-primary);
-    padding: 4px 10px;
-    border-radius: 8px;
-    font-size: 12px;
-    font-weight: 700;
-    cursor: pointer;
-}
-.drawer-add-btn:active { transform: scale(0.94); }
-
-.drawer-body {
+.drawer-scroll-area {
     flex: 1;
     overflow-y: auto;
-    padding-right: 2px;
-}
-.drawer-body .card {
-    margin-bottom: 10px;
-}
-.drawer-body .card-header {
-    padding: 12px 14px;
-}
-.drawer-body .card-header h3 {
-    font-size: 14px;
-}
-.drawer-body .card-detail {
-    padding: 12px 14px;
-    font-size: 13px;
+    padding-top: 16px;
+    padding-bottom: 32px;
 }
 
-.drawer-footer {
-    padding-top: 12px;
-    margin-top: 10px;
-    border-top: 1px solid var(--border-line);
-}
-.drawer-footer-title {
-    display: block;
+.drawer-sub-heading {
     font-size: 11px;
-    font-weight: 700;
+    font-weight: 800;
     color: var(--text-muted);
-    margin-bottom: 8px;
     text-transform: uppercase;
-    letter-spacing: 0.4px;
+    letter-spacing: 0.6px;
+    margin: 14px 0 8px 0;
 }
-.drawer-backup-btns {
+.drawer-sub-heading:first-child {
+    margin-top: 0;
+}
+
+/* --- OPSI GULIR BAWAH DI DALAM PANEL --- */
+.drawer-bottom-menu {
+    margin-top: 26px;
+    padding-top: 18px;
+    border-top: 1px dashed var(--border-line);
     display: flex;
+    flex-direction: column;
     gap: 8px;
 }
-.drawer-util-btn {
-    flex: 1;
+.drawer-menu-heading {
+    font-size: 11px;
+    font-weight: 800;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+}
+.drawer-option-btn {
+    width: 100%;
     background-color: var(--bg-card);
     color: var(--text-main);
     border: 1px solid var(--border-line);
-    padding: 9px 10px;
-    border-radius: 9px;
+    padding: 13px 16px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 700;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+}
+.drawer-option-btn:active { transform: scale(0.98); }
+.drawer-option-btn.active {
+    background-color: var(--text-main);
+    color: #FFFFFF;
+    border-color: var(--text-main);
+}
+.drawer-option-btn small {
+    font-family: var(--font-mono);
     font-size: 12px;
     font-weight: 700;
-    cursor: pointer;
-    transition: transform 0.15s ease;
+    opacity: 0.75;
 }
-.drawer-util-btn:active { transform: scale(0.95); }
+.drawer-option-btn.primary-action {
+    border-color: var(--btn-primary);
+    color: var(--btn-primary);
+    justify-content: center;
+}
+
+/* --- KARTU SEMESTER DI PANEL MATKUL --- */
+.semester-card {
+    background-color: var(--bg-card);
+    border: 1.5px solid var(--border-line);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: border-color 0.2s ease, transform 0.15s ease;
+}
+.semester-card:active { transform: scale(0.98); }
+.semester-card.active-sem {
+    border-color: var(--text-main);
+    background-color: rgba(45, 42, 38, 0.03);
+}
+.semester-card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+}
+.semester-card-title {
+    font-size: 15px;
+    font-weight: 800;
+    color: var(--text-main);
+}
+.semester-card-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 3px;
+}
+.semester-badge-active {
+    background-color: var(--btn-primary);
+    color: #FFFFFF;
+    font-size: 10px;
+    font-weight: 800;
+    padding: 4px 9px;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.semester-card-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border-line);
+}
 
 /* --- FAB, BACKDROP BLUR & ANIMASI HIDE SAAT MODAL / SCROLL --- */
 .fab-backdrop {
@@ -351,9 +384,25 @@ header p { color: var(--text-muted); font-size: 14px; font-weight: 500; margin-t
 .nav-item.active svg { stroke: var(--btn-primary); transform: scale(1.1); }
 
 .calendar-header { display: flex; justify-content: center; align-items: flex-start; margin-bottom: 15px; position: relative; min-height: 55px; }
-.calendar-header button { position: absolute; top: 0; background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-line); border-radius: 8px; padding: 5px 15px; font-weight: bold; cursor: pointer; z-index: 2; }
+.calendar-header button.btn-prev,
+.calendar-header button.btn-next { position: absolute; top: 0; background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-line); border-radius: 8px; padding: 5px 15px; font-weight: bold; cursor: pointer; z-index: 2; }
 .calendar-header button.btn-prev { left: 0; }
 .calendar-header button.btn-next { right: 0; }
+
+.today-jump-pill {
+    display: inline-block;
+    margin-top: 5px;
+    padding: 3px 11px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--btn-primary);
+    background-color: rgba(194, 89, 52, 0.1);
+    border: 1px solid rgba(194, 89, 52, 0.35);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: transform 0.15s ease;
+}
+.today-jump-pill:active { transform: scale(0.94); }
 
 .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
 .day-name { text-align: center; font-size: 12px; color: var(--text-muted); font-weight: 700; }
@@ -408,8 +457,8 @@ header p { color: var(--text-muted); font-size: 14px; font-weight: 500; margin-t
 .tab-btn { flex: 1; background: var(--bg-card); color: var(--text-muted); border: 1px solid var(--border-line); padding: 10px 6px; border-radius: 8px; font-size: 13px; font-weight: bold; cursor: pointer; }
 .tab-btn.active { background: var(--text-main); color: white; border-color: var(--text-main); }
 
-.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(45, 42, 38, 0.6); display: none; justify-content: center; align-items: center; z-index: 30; backdrop-filter: blur(2px); }
-.modal { background-color: var(--bg-card); padding: 24px; border-radius: 16px; width: 90%; max-width: 360px; max-height: 85vh; overflow-y: auto; }
+.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(45, 42, 38, 0.6); display: none; justify-content: center; align-items: center; z-index: 35; backdrop-filter: blur(2px); }
+.modal { background-color: var(--bg-card); padding: 24px; border-radius: 16px; width: 90%; max-width: 360px; max-height: 85vh; overflow-y: auto; box-shadow: 0 12px 32px rgba(45, 42, 38, 0.18); }
 .modal h2 { color: var(--text-main); font-weight: 800; margin-bottom: 10px; }
 .modal label { font-size: 12px; color: var(--text-muted); font-weight: 700; display: block; margin-bottom: 4px; margin-top: 12px; }
 .modal input, .modal select, .modal textarea { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border-line); background-color: var(--bg-main); color: var(--text-main); font-weight: 500; }
@@ -418,6 +467,27 @@ header p { color: var(--text-muted); font-size: 14px; font-weight: 500; margin-t
 .modal-btns button { padding: 10px 16px; border-radius: 8px; border: none; font-weight: 700; cursor: pointer; }
 .btn-save { background-color: var(--btn-primary); color: white; }
 .btn-cancel { background-color: var(--btn-skip); color: var(--text-main); }
+
+/* --- CUSTOM DIALOG BERTEMA POLA --- */
+#pola-dialog-overlay { z-index: 60; }
+.pola-dialog-box {
+    max-width: 320px;
+    padding: 22px;
+}
+.pola-dialog-title {
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--text-main);
+    margin-bottom: 6px;
+}
+.pola-dialog-msg {
+    font-size: 14px;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+.pola-dialog-box .modal-btns {
+    margin-top: 20px;
+}
 
 .reminder-row { display: flex; gap: 8px; }
 .reminder-row input { width: 45%; }

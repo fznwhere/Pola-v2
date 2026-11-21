@@ -1,5 +1,9 @@
-let currentNavDate = new Date(); let editId = null; const namaHari = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']; let currentHistoryTab = 'Tugas Kuliah';
+let currentNavDate = new Date();
+let editId = null;
+const namaHari = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+let currentHistoryTab = 'Tugas Kuliah';
 let currentDrawerTab = 'Rutinitas';
+let editSemesterId = null;
 
 const liburNasional = {
     "2026-01-01": "Tahun Baru Masehi", "2026-02-18": "Isra Mikraj", "2026-02-19": "Tahun Baru Imlek", "2026-03-20": "Hari Raya Nyepi / Idul Fitri",
@@ -21,6 +25,194 @@ const iRom = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${st
 const iPls = `<svg viewBox="0 0 24 24" width="28" height="28" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
 const iDel = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${strk}" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
 
+// --- CUSTOM DIALOG BERTEMA POLA (PENGGANTI ALERT & CONFIRM) ---
+function ensurePolaDialogExists() {
+    if (document.getElementById('pola-dialog-overlay')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'pola-dialog-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+        <div class="modal pola-dialog-box">
+            <h3 class="pola-dialog-title" id="pola-dialog-title">Pola.</h3>
+            <p class="pola-dialog-msg" id="pola-dialog-msg"></p>
+            <div class="modal-btns" id="pola-dialog-btns"></div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+}
+
+function polaAlert(message, title = 'Perhatian') {
+    ensurePolaDialogExists();
+    return new Promise((resolve) => {
+        const overlay = document.getElementById('pola-dialog-overlay');
+        document.getElementById('pola-dialog-title').innerText = title;
+        document.getElementById('pola-dialog-msg').innerText = message;
+        const btns = document.getElementById('pola-dialog-btns');
+        btns.innerHTML = `<button class="btn-save" id="pola-dialog-ok">Mengerti</button>`;
+        overlay.style.display = 'flex';
+        document.getElementById('pola-dialog-ok').onclick = () => {
+            overlay.style.display = 'none';
+            resolve(true);
+        };
+    });
+}
+
+function polaConfirm(message, title = 'Konfirmasi', confirmLabel = 'Ya, Lanjutkan') {
+    ensurePolaDialogExists();
+    return new Promise((resolve) => {
+        const overlay = document.getElementById('pola-dialog-overlay');
+        document.getElementById('pola-dialog-title').innerText = title;
+        document.getElementById('pola-dialog-msg').innerText = message;
+        const btns = document.getElementById('pola-dialog-btns');
+        btns.innerHTML = `
+            <button class="btn-cancel" id="pola-dialog-cancel">Batal</button>
+            <button class="btn-save" id="pola-dialog-confirm">${confirmLabel}</button>
+        `;
+        overlay.style.display = 'flex';
+        document.getElementById('pola-dialog-cancel').onclick = () => {
+            overlay.style.display = 'none';
+            resolve(false);
+        };
+        document.getElementById('pola-dialog-confirm').onclick = () => {
+            overlay.style.display = 'none';
+            resolve(true);
+        };
+    });
+}
+
+// --- LOKASI USER & JADWAL SALAT DINAMIS ---
+function getSavedCoordinates() {
+    const saved = JSON.parse(localStorage.getItem('nalaUserLocation'));
+    if (saved && typeof saved.lat === 'number' && typeof saved.lng === 'number') {
+        return saved;
+    }
+    return { lat: -7.7956, lng: 110.3695, isFallback: true };
+}
+
+function refreshUserCoordinates() {
+    return new Promise((resolve) => {
+        const current = getSavedCoordinates();
+        if (!navigator.geolocation) {
+            resolve(current);
+            return;
+        }
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                const lat = Number(pos.coords.latitude.toFixed(4));
+                const lng = Number(pos.coords.longitude.toFixed(4));
+                const movedFar =
+                    current.isFallback ||
+                    Math.abs(lat - current.lat) > 0.15 ||
+                    Math.abs(lng - current.lng) > 0.15;
+
+                const updated = { lat, lng, isFallback: false, updatedAt: Date.now() };
+                localStorage.setItem('nalaUserLocation', JSON.stringify(updated));
+
+                if (movedFar) {
+                    Object.keys(localStorage).forEach((k) => {
+                        if (k.startsWith('nalaSalat_')) localStorage.removeItem(k);
+                    });
+                    if (document.getElementById('schedule-list')) loadTodaySchedule();
+                    if (typeof syncAndroidAlarms === 'function') syncAndroidAlarms();
+                }
+                resolve(updated);
+            },
+            () => resolve(current),
+            { enableHighAccuracy: false, timeout: 6000, maximumAge: 30 * 60 * 1000 }
+        );
+    });
+}
+
+async function fetchSalatTimingsForDate(dateObj, dateStr) {
+    const loc = getSavedCoordinates();
+    const locKey = `${loc.lat.toFixed(2)}_${loc.lng.toFixed(2)}`;
+    const cacheKey = `nalaSalat_${dateStr}_${locKey}`;
+    const cached = JSON.parse(localStorage.getItem(cacheKey));
+    if (cached && Array.isArray(cached) && cached.length === 5) {
+        return cached;
+    }
+
+    const dd = String(dateObj.getDate()).padStart(2, '0');
+    const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const yyyy = dateObj.getFullYear();
+
+    try {
+        const res = await fetch(
+            `https://api.aladhan.com/v1/timings/${dd}-${mm}-${yyyy}?latitude=${loc.lat}&longitude=${loc.lng}&method=11`
+        );
+        const t = (await res.json()).data.timings;
+        const result = [
+            { name: 'Subuh', time: t.Fajr.slice(0, 5) },
+            { name: 'Zuhur', time: t.Dhuhr.slice(0, 5) },
+            { name: 'Asar', time: t.Asr.slice(0, 5) },
+            { name: 'Maghrib', time: t.Maghrib.slice(0, 5) },
+            { name: 'Isya', time: t.Isha.slice(0, 5) }
+        ];
+        localStorage.setItem(cacheKey, JSON.stringify(result));
+        return result;
+    } catch (e) {
+        return [
+            { name: 'Subuh', time: '04:30' },
+            { name: 'Zuhur', time: '11:45' },
+            { name: 'Asar', time: '15:00' },
+            { name: 'Maghrib', time: '17:45' },
+            { name: 'Isya', time: '19:00' }
+        ];
+    }
+}
+
+// --- MANAJEMEN SEMESTER KULIAH ---
+function ensureSemesterInitialized() {
+    let semesters = JSON.parse(localStorage.getItem('nalaSemesters'));
+    let activeId = localStorage.getItem('nalaActiveSemesterId');
+
+    if (!Array.isArray(semesters) || semesters.length === 0) {
+        semesters = [{ id: 'sem_1', name: 'Semester 1', createdAt: Date.now() }];
+        activeId = 'sem_1';
+        localStorage.setItem('nalaSemesters', JSON.stringify(semesters));
+        localStorage.setItem('nalaActiveSemesterId', activeId);
+    }
+
+    if (!activeId || !semesters.some((s) => s.id === activeId)) {
+        activeId = semesters[0].id;
+        localStorage.setItem('nalaActiveSemesterId', activeId);
+    }
+
+    let savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
+    let migrated = false;
+    savedMatkul.forEach((m) => {
+        if (!m.semesterId) {
+            m.semesterId = activeId;
+            migrated = true;
+        }
+    });
+    if (migrated) {
+        localStorage.setItem('nalaMatkul', JSON.stringify(savedMatkul));
+    }
+
+    return { semesters, activeId };
+}
+
+function getActiveSemesterId() {
+    return ensureSemesterInitialized().activeId;
+}
+
+function getActiveSemesterObj() {
+    const { semesters, activeId } = ensureSemesterInitialized();
+    return semesters.find((s) => s.id === activeId) || semesters[0];
+}
+
+function getActiveMatkulList() {
+    const activeId = getActiveSemesterId();
+    const savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
+    return savedMatkul.filter((m) => m.semesterId === activeId);
+}
+
+function setActiveSemester(semId) {
+    localStorage.setItem('nalaActiveSemesterId', semId);
+    refreshAllViews();
+}
+
 function getFabContainer() {
     const fab = document.querySelector('.fab');
     return document.querySelector('.fab-container') || fab;
@@ -33,8 +225,10 @@ function hideFabForModal() {
 }
 
 function showFabAfterModal() {
-    const drawer = document.getElementById('side-drawer');
-    if (drawer && drawer.classList.contains('open')) return;
+    const leftDrawer = document.getElementById('side-drawer');
+    const rightDrawer = document.getElementById('right-semester-drawer');
+    if (leftDrawer && leftDrawer.classList.contains('open')) return;
+    if (rightDrawer && rightDrawer.classList.contains('open')) return;
     const target = getFabContainer();
     if (target) {
         target.classList.remove('fab-modal-hidden');
@@ -42,37 +236,25 @@ function showFabAfterModal() {
     }
 }
 
-// --- PANEL GESER KIRI (GEMINI-STYLE DRAWER) ---
+// --- PANEL GESER KIRI FULL-SCREEN (BERANDA) ---
 function openSideDrawer() {
     const drawer = document.getElementById('side-drawer');
-    const backdrop = document.getElementById('drawer-backdrop');
     if (!drawer) return;
     drawer.style.transition = '';
     drawer.style.transform = '';
     drawer.classList.add('open');
     drawer.setAttribute('aria-hidden', 'false');
-    if (backdrop) {
-        backdrop.style.transition = '';
-        backdrop.style.opacity = '';
-        backdrop.classList.add('show');
-    }
     hideFabForModal();
     renderSideDrawerContent();
 }
 
 function closeSideDrawer() {
     const drawer = document.getElementById('side-drawer');
-    const backdrop = document.getElementById('drawer-backdrop');
     if (!drawer) return;
     drawer.style.transition = '';
     drawer.style.transform = '';
     drawer.classList.remove('open');
     drawer.setAttribute('aria-hidden', 'true');
-    if (backdrop) {
-        backdrop.style.transition = '';
-        backdrop.style.opacity = '';
-        backdrop.classList.remove('show');
-    }
     const insertModal = document.getElementById('insert-modal');
     if (!insertModal || insertModal.style.display !== 'flex') {
         showFabAfterModal();
@@ -81,15 +263,23 @@ function closeSideDrawer() {
 
 function switchDrawerTab(tabName) {
     currentDrawerTab = tabName;
-    if (document.getElementById('dtab-rutinitas')) document.getElementById('dtab-rutinitas').classList.toggle('active', tabName === 'Rutinitas');
-    if (document.getElementById('dtab-acara')) document.getElementById('dtab-acara').classList.toggle('active', tabName === 'Acara');
-    if (document.getElementById('dtab-libur')) document.getElementById('dtab-libur').classList.toggle('active', tabName === 'Libur');
+    ['Rutinitas', 'Acara', 'Libur'].forEach((t) => {
+        const btn = document.getElementById(`dopt-${t.toLowerCase()}`);
+        if (btn) btn.classList.toggle('active', t === tabName);
+    });
     renderSideDrawerContent();
+    const scrollArea = document.getElementById('drawer-scroll-area');
+    if (scrollArea) scrollArea.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function openModalFromDrawer() {
-    closeSideDrawer();
-    openModal(currentDrawerTab);
+function updateDrawerOptionCounts() {
+    const routines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
+    const acaras = (JSON.parse(localStorage.getItem('nalaTasks')) || []).filter((t) => t.category === 'Acara');
+    const libur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
+
+    if (document.getElementById('dcount-rutinitas')) document.getElementById('dcount-rutinitas').innerText = routines.length;
+    if (document.getElementById('dcount-acara')) document.getElementById('dcount-acara').innerText = acaras.length;
+    if (document.getElementById('dcount-libur')) document.getElementById('dcount-libur').innerText = libur.length;
 }
 
 function renderSideDrawerContent() {
@@ -97,15 +287,20 @@ function renderSideDrawerContent() {
     const labelEl = document.getElementById('drawer-section-label');
     if (!container) return;
 
+    updateDrawerOptionCounts();
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
     if (currentDrawerTab === 'Rutinitas') {
         if (labelEl) labelEl.innerText = 'Data Rutinitas';
         const routines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
         if (routines.length === 0) {
-            container.innerHTML = '<p style="color:var(--text-muted); font-size:13px; text-align:center; margin-top:24px;">Belum ada data rutinitas.</p>';
+            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada data rutinitas.</p>';
             return;
         }
-        let html = '';
-        routines.forEach(r => {
+        let html = '<div class="drawer-sub-heading">Jadwal Rutin Aktif</div>';
+        routines.forEach((r) => {
             html += `
                 <div class="card" onclick="toggleDetail(this)">
                     <div class="card-header" style="background-color: ${r.color || 'var(--color-rutin)'};">
@@ -131,24 +326,42 @@ function renderSideDrawerContent() {
     } else if (currentDrawerTab === 'Acara') {
         if (labelEl) labelEl.innerText = 'Data Acara';
         const tasks = JSON.parse(localStorage.getItem('nalaTasks')) || [];
-        const acaras = tasks.filter(t => t.category === 'Acara').sort((a, b) => b.date.localeCompare(a.date));
+        const acaras = tasks.filter((t) => t.category === 'Acara');
+
+        const upcomingAcaras = [];
+        const pastAcaras = [];
+
+        acaras.forEach((t) => {
+            const endStr = t.endDate || t.date;
+            const endDateObj = new Date(endStr);
+            endDateObj.setHours(0, 0, 0, 0);
+            if (endDateObj < today) pastAcaras.push(t);
+            else upcomingAcaras.push(t);
+        });
+
+        upcomingAcaras.sort((a, b) => a.date.localeCompare(b.date));
+        pastAcaras.sort((a, b) => b.date.localeCompare(a.date));
+
         if (acaras.length === 0) {
-            container.innerHTML = '<p style="color:var(--text-muted); font-size:13px; text-align:center; margin-top:24px;">Belum ada data acara.</p>';
+            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada data acara.</p>';
             return;
         }
-        let html = '';
-        acaras.forEach(t => {
+
+        const buildAcaraCard = (t, isPast) => {
             const dateText = t.endDate && t.endDate !== t.date ? `${formatShortDate(t.date)} s/d ${formatShortDate(t.endDate)}` : formatShortDate(t.date);
-            html += `
-                <div class="card" onclick="toggleDetail(this)">
+            const opacityStyle = isPast ? 'opacity: 0.72;' : '';
+            const badgeHtml = isPast ? '<span class="tag-pill">Terlewat</span>' : '';
+            return `
+                <div class="card" onclick="toggleDetail(this)" style="${opacityStyle}">
                     <div class="card-header" style="background-color: ${t.color || 'var(--color-acara)'};">
                         <div class="card-header-top">
                             <div class="card-title-group">
                                 <div>
                                     <h3>${t.name}</h3>
-                                    <small class="time-badge">${iDat} ${dateText}   ${iClk} ${t.time}</small>
+                                    <small class="time-badge">${iDat} ${dateText}   ${iClk} ${t.time}${t.endTime ? ' - ' + t.endTime : ''}</small>
                                 </div>
                             </div>
+                            ${badgeHtml}
                         </div>
                     </div>
                     <div class="card-detail">
@@ -160,20 +373,52 @@ function renderSideDrawerContent() {
                         </div>
                     </div>
                 </div>`;
-        });
+        };
+
+        let html = '<div class="drawer-sub-heading">Akan Datang & Berlangsung</div>';
+        if (upcomingAcaras.length === 0) {
+            html += '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">Tidak ada acara mendatang.</p>';
+        } else {
+            upcomingAcaras.forEach((t) => { html += buildAcaraCard(t, false); });
+        }
+
+        html += '<div class="drawer-sub-heading">Sudah Terlewat</div>';
+        if (pastAcaras.length === 0) {
+            html += '<p style="color:var(--text-muted); font-size:13px;">Belum ada acara yang terlewat.</p>';
+        } else {
+            pastAcaras.forEach((t) => { html += buildAcaraCard(t, true); });
+        }
+
         container.innerHTML = html;
     } else if (currentDrawerTab === 'Libur') {
-        if (labelEl) labelEl.innerText = 'Data Libur';
+        if (labelEl) labelEl.innerText = 'Data Hari Libur';
         const libur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
+
         if (libur.length === 0) {
-            container.innerHTML = '<p style="color:var(--text-muted); font-size:13px; text-align:center; margin-top:24px;">Belum ada jadwal libur khusus.</p>';
+            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada jadwal libur khusus.</p>';
             return;
         }
-        let html = '';
-        libur.forEach(l => {
+
+        const upcomingLibur = [];
+        const pastLibur = [];
+
+        libur.forEach((l) => {
+            const endStr = l.endDate || l.startDate;
+            const endDateObj = new Date(endStr);
+            endDateObj.setHours(0, 0, 0, 0);
+            if (endDateObj < today) pastLibur.push(l);
+            else upcomingLibur.push(l);
+        });
+
+        upcomingLibur.sort((a, b) => a.startDate.localeCompare(b.startDate));
+        pastLibur.sort((a, b) => b.startDate.localeCompare(a.startDate));
+
+        const buildLiburCard = (l, isPast) => {
             const dateText = l.startDate === l.endDate ? formatShortDate(l.startDate) : `${formatShortDate(l.startDate)} s/d ${formatShortDate(l.endDate)}`;
-            html += `
-                <div class="card" onclick="toggleDetail(this)">
+            const opacityStyle = isPast ? 'opacity: 0.72;' : '';
+            const badgeHtml = isPast ? '<span class="tag-pill">Terlewat</span>' : '';
+            return `
+                <div class="card" onclick="toggleDetail(this)" style="${opacityStyle}">
                     <div class="card-header" style="background-color: var(--color-minggu);">
                         <div class="card-header-top">
                             <div class="card-title-group">
@@ -182,6 +427,7 @@ function renderSideDrawerContent() {
                                     <small class="time-badge">${iDat} ${dateText}</small>
                                 </div>
                             </div>
+                            ${badgeHtml}
                         </div>
                     </div>
                     <div class="card-detail">
@@ -192,14 +438,28 @@ function renderSideDrawerContent() {
                         </div>
                     </div>
                 </div>`;
-        });
+        };
+
+        let html = '<div class="drawer-sub-heading">Akan Datang & Berlangsung</div>';
+        if (upcomingLibur.length === 0) {
+            html += '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">Tidak ada jadwal libur mendatang.</p>';
+        } else {
+            upcomingLibur.forEach((l) => { html += buildLiburCard(l, false); });
+        }
+
+        html += '<div class="drawer-sub-heading">Sudah Terlewat</div>';
+        if (pastLibur.length === 0) {
+            html += '<p style="color:var(--text-muted); font-size:13px;">Belum ada jadwal libur yang terlewat.</p>';
+        } else {
+            pastLibur.forEach((l) => { html += buildLiburCard(l, true); });
+        }
+
         container.innerHTML = html;
     }
 }
 
 function initSideDrawerGestures() {
     const drawer = document.getElementById('side-drawer');
-    const backdrop = document.getElementById('drawer-backdrop');
     if (!drawer) return;
 
     let startX = 0;
@@ -240,29 +500,25 @@ function initSideDrawerGestures() {
             }
             if (isDragging) {
                 drawer.style.transition = 'none';
-                if (backdrop) {
-                    backdrop.style.transition = 'none';
-                    backdrop.classList.add('show');
-                }
+                drawer.style.visibility = 'visible';
                 if (!startedOpen) renderSideDrawerContent();
             }
         }
 
         if (!isDragging) return;
-        const drawerWidth = drawer.offsetWidth || 300;
+        const drawerWidth = drawer.offsetWidth || window.innerWidth;
         let progress = startedOpen ? 1 + dx / drawerWidth : dx / drawerWidth;
         progress = Math.max(0, Math.min(1, progress));
 
-        drawer.style.transform = `translateX(${(progress - 1) * 100}%)`;
-        if (backdrop) backdrop.style.opacity = String(progress);
+        drawer.style.transform = `translate(${-150 + progress * 100}%, 0)`;
     }, { passive: true });
 
     document.addEventListener('touchend', () => {
         if (!isDragging) return;
         isDragging = false;
         const dx = currentX - startX;
-        const drawerWidth = drawer.offsetWidth || 300;
-        const threshold = drawerWidth * 0.28;
+        const drawerWidth = drawer.offsetWidth || window.innerWidth;
+        const threshold = drawerWidth * 0.25;
 
         if (!startedOpen) {
             if (dx > threshold) openSideDrawer();
@@ -274,66 +530,308 @@ function initSideDrawerGestures() {
     });
 }
 
-function exportPolaBackup() {
-    const payload = {
-        app: 'Pola.',
-        exportedAt: new Date().toISOString(),
-        data: {
-            nalaMatkul: JSON.parse(localStorage.getItem('nalaMatkul')) || [],
-            nalaTasks: JSON.parse(localStorage.getItem('nalaTasks')) || [],
-            nalaRoutines: JSON.parse(localStorage.getItem('nalaRoutines')) || [],
-            nalaOverrides: JSON.parse(localStorage.getItem('nalaOverrides')) || [],
-            nalaLibur: JSON.parse(localStorage.getItem('nalaLibur')) || []
-        }
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    const todayStr = new Date().toISOString().slice(0, 10);
-    a.href = url;
-    a.download = `pola-backup-${todayStr}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+// --- PANEL GESER KANAN FULL-SCREEN (SEMESTER MATKUL) ---
+function setupMatkulSemesterUI() {
+    const matkulListEl = document.getElementById('matkul-list');
+    if (!matkulListEl) return;
+
+    ensureSemesterInitialized();
+
+    const headerEl = document.querySelector('header');
+    if (headerEl && !document.getElementById('semester-trigger-btn')) {
+        headerEl.classList.add('matkul-header');
+        const pEl = headerEl.querySelector('p');
+        if (pEl) pEl.id = 'active-semester-subtitle';
+
+        const btn = document.createElement('button');
+        btn.id = 'semester-trigger-btn';
+        btn.className = 'semester-trigger-btn';
+        btn.setAttribute('aria-label', 'Kelola Semester Kuliah');
+        btn.onclick = openRightSemesterDrawer;
+        btn.innerHTML = `
+            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                <polyline points="2 17 12 22 22 17"></polyline>
+                <polyline points="2 12 12 17 22 12"></polyline>
+            </svg>
+        `;
+        headerEl.appendChild(btn);
+    }
+
+    if (!document.getElementById('right-semester-drawer')) {
+        const aside = document.createElement('aside');
+        aside.id = 'right-semester-drawer';
+        aside.className = 'right-drawer';
+        aside.setAttribute('aria-hidden', 'true');
+        aside.innerHTML = `
+            <div class="drawer-header">
+                <div>
+                    <h2 class="drawer-brand">Semester<span class="brand-dot">.</span></h2>
+                    <span class="drawer-subtitle">Pilih atau Tambah Jadwal Semester</span>
+                </div>
+                <button class="drawer-close-btn" onclick="closeRightSemesterDrawer()" aria-label="Kembali ke Jadwal Kuliah">
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+            </div>
+            <div class="drawer-scroll-area">
+                <div class="drawer-sub-heading">Daftar Semester Tersimpan</div>
+                <div id="semester-list-container"></div>
+                <div class="drawer-bottom-menu">
+                    <span class="drawer-menu-heading">Opsi Semester</span>
+                    <button class="drawer-option-btn primary-action" onclick="openNewSemesterModal()">+ Tambah Semester Baru</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(aside);
+    }
+
+    if (!document.getElementById('semester-form-modal')) {
+        const modal = document.createElement('div');
+        modal.id = 'semester-form-modal';
+        modal.className = 'modal-overlay';
+        modal.innerHTML = `
+            <div class="modal">
+                <h2 id="sem-modal-title">Semester Baru</h2>
+                <form id="semester-form" onsubmit="event.preventDefault(); saveSemesterForm();">
+                    <label>Nama Semester *</label>
+                    <input type="text" id="sem-name-input" placeholder="Contoh: Semester 4">
+                    <div id="sem-copy-wrapper">
+                        <label>Isi Awal Jadwal</label>
+                        <select id="sem-copy-select">
+                            <option value="empty">Mulai kosong</option>
+                            <option value="copy">Salin dari semester aktif saat ini</option>
+                        </select>
+                    </div>
+                </form>
+                <div class="modal-btns">
+                    <button class="btn-cancel" onclick="closeModal('semester-form-modal')">Batal</button>
+                    <button class="btn-save" onclick="saveSemesterForm()">Simpan</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
+
+    initRightDrawerGestures();
 }
 
-function triggerImportBackup() {
-    const input = document.getElementById('import-backup-input');
-    if (input) {
-        input.value = '';
-        input.click();
+function openRightSemesterDrawer() {
+    const drawer = document.getElementById('right-semester-drawer');
+    if (!drawer) return;
+    drawer.style.transition = '';
+    drawer.style.transform = '';
+    drawer.classList.add('open');
+    drawer.setAttribute('aria-hidden', 'false');
+    hideFabForModal();
+    renderSemesterDrawerList();
+}
+
+function closeRightSemesterDrawer() {
+    const drawer = document.getElementById('right-semester-drawer');
+    if (!drawer) return;
+    drawer.style.transition = '';
+    drawer.style.transform = '';
+    drawer.classList.remove('open');
+    drawer.setAttribute('aria-hidden', 'true');
+    const matkulModal = document.getElementById('matkul-modal');
+    if (!matkulModal || matkulModal.style.display !== 'flex') {
+        showFabAfterModal();
     }
 }
 
-function handleImportBackup(event) {
-    const file = event.target.files && event.target.files[0];
-    if (!file) return;
+function renderSemesterDrawerList() {
+    const container = document.getElementById('semester-list-container');
+    if (!container) return;
 
-    const reader = new FileReader();
-    reader.onload = function (e) {
-        try {
-            const parsed = JSON.parse(e.target.result);
-            const data = parsed.data ? parsed.data : parsed;
-            if (!data || (!Array.isArray(data.nalaMatkul) && !Array.isArray(data.nalaTasks) && !Array.isArray(data.nalaRoutines))) {
-                alert('Format file cadangan tidak valid.');
-                return;
-            }
-            if (!confirm('Pulihkan data dari file ini? Data saat ini akan diganti dengan isi file cadangan.')) return;
+    const { semesters, activeId } = ensureSemesterInitialized();
+    const allMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
 
-            if (Array.isArray(data.nalaMatkul)) localStorage.setItem('nalaMatkul', JSON.stringify(data.nalaMatkul));
-            if (Array.isArray(data.nalaTasks)) localStorage.setItem('nalaTasks', JSON.stringify(data.nalaTasks));
-            if (Array.isArray(data.nalaRoutines)) localStorage.setItem('nalaRoutines', JSON.stringify(data.nalaRoutines));
-            if (Array.isArray(data.nalaOverrides)) localStorage.setItem('nalaOverrides', JSON.stringify(data.nalaOverrides));
-            if (Array.isArray(data.nalaLibur)) localStorage.setItem('nalaLibur', JSON.stringify(data.nalaLibur));
+    let html = '';
+    semesters.forEach((sem) => {
+        const isActive = sem.id === activeId;
+        const count = allMatkul.filter((m) => m.semesterId === sem.id).length;
+        html += `
+            <div class="semester-card ${isActive ? 'active-sem' : ''}" onclick="selectSemesterFromDrawer('${sem.id}')">
+                <div class="semester-card-top">
+                    <div>
+                        <div class="semester-card-title">${sem.name}</div>
+                        <div class="semester-card-meta">${count} Mata Kuliah tersimpan</div>
+                    </div>
+                    ${isActive ? '<span class="semester-badge-active">Aktif</span>' : ''}
+                </div>
+                <div class="semester-card-actions">
+                    ${semesters.length > 1 ? `<button class="icon-btn delete" onclick="event.stopPropagation(); deleteSemesterItem('${sem.id}')">${iDel} Hapus</button>` : ''}
+                    <button class="icon-btn" onclick="event.stopPropagation(); openEditSemesterModal('${sem.id}')">${iEdt} Ubah Nama</button>
+                </div>
+            </div>
+        `;
+    });
 
-            refreshAllViews();
-            alert('Data berhasil dipulihkan!');
-        } catch (err) {
-            alert('Gagal membaca file JSON.');
+    container.innerHTML = html;
+}
+
+function selectSemesterFromDrawer(semId) {
+    setActiveSemester(semId);
+    renderSemesterDrawerList();
+    closeRightSemesterDrawer();
+}
+
+function openNewSemesterModal() {
+    editSemesterId = null;
+    document.getElementById('sem-modal-title').innerText = 'Semester Baru';
+    document.getElementById('sem-name-input').value = '';
+    document.getElementById('sem-copy-wrapper').style.display = 'block';
+    document.getElementById('sem-copy-select').value = 'empty';
+    document.getElementById('semester-form-modal').style.display = 'flex';
+}
+
+function openEditSemesterModal(semId) {
+    const { semesters } = ensureSemesterInitialized();
+    const target = semesters.find((s) => s.id === semId);
+    if (!target) return;
+    editSemesterId = semId;
+    document.getElementById('sem-modal-title').innerText = 'Ubah Nama Semester';
+    document.getElementById('sem-name-input').value = target.name;
+    document.getElementById('sem-copy-wrapper').style.display = 'none';
+    document.getElementById('semester-form-modal').style.display = 'flex';
+}
+
+async function saveSemesterForm() {
+    const nameInput = document.getElementById('sem-name-input');
+    const name = nameInput ? nameInput.value.trim() : '';
+    if (!name) {
+        await polaAlert('Nama semester wajib diisi.');
+        return;
+    }
+
+    const { semesters, activeId } = ensureSemesterInitialized();
+
+    if (editSemesterId) {
+        const idx = semesters.findIndex((s) => s.id === editSemesterId);
+        if (idx !== -1) semesters[idx].name = name;
+        localStorage.setItem('nalaSemesters', JSON.stringify(semesters));
+    } else {
+        const newId = 'sem_' + Date.now();
+        semesters.push({ id: newId, name, createdAt: Date.now() });
+        localStorage.setItem('nalaSemesters', JSON.stringify(semesters));
+
+        const copyMode = document.getElementById('sem-copy-select').value;
+        if (copyMode === 'copy') {
+            const allMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
+            const activeCourses = allMatkul.filter((m) => m.semesterId === activeId);
+            activeCourses.forEach((m, index) => {
+                allMatkul.push({ ...m, id: Date.now() + index + 1, semesterId: newId });
+            });
+            localStorage.setItem('nalaMatkul', JSON.stringify(allMatkul));
         }
-    };
-    reader.readAsText(file);
+
+        localStorage.setItem('nalaActiveSemesterId', newId);
+    }
+
+    closeModal('semester-form-modal');
+    renderSemesterDrawerList();
+    refreshAllViews();
+}
+
+async function deleteSemesterItem(semId) {
+    const { semesters, activeId } = ensureSemesterInitialized();
+    if (semesters.length <= 1) {
+        await polaAlert('Minimal harus ada satu semester yang tersimpan.');
+        return;
+    }
+
+    const ok = await polaConfirm('Hapus semester ini beserta seluruh mata kuliah di dalamnya?', 'Hapus Semester', 'Hapus');
+    if (!ok) return;
+
+    const remaining = semesters.filter((s) => s.id !== semId);
+    localStorage.setItem('nalaSemesters', JSON.stringify(remaining));
+
+    let allMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
+    allMatkul = allMatkul.filter((m) => m.semesterId !== semId);
+    localStorage.setItem('nalaMatkul', JSON.stringify(allMatkul));
+
+    if (activeId === semId) {
+        localStorage.setItem('nalaActiveSemesterId', remaining[0].id);
+    }
+
+    renderSemesterDrawerList();
+    refreshAllViews();
+}
+
+function initRightDrawerGestures() {
+    const drawer = document.getElementById('right-semester-drawer');
+    if (!drawer) return;
+
+    let startX = 0;
+    let startY = 0;
+    let currentX = 0;
+    let gestureDecided = false;
+    let isDragging = false;
+    let startedOpen = false;
+
+    document.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1) return;
+        const matkulModal = document.getElementById('matkul-modal');
+        const semModal = document.getElementById('semester-form-modal');
+        if ((matkulModal && matkulModal.style.display === 'flex') || (semModal && semModal.style.display === 'flex')) return;
+
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        currentX = startX;
+        gestureDecided = false;
+        isDragging = false;
+        startedOpen = drawer.classList.contains('open');
+    }, { passive: true });
+
+    document.addEventListener('touchmove', (e) => {
+        if (e.touches.length !== 1) return;
+        const matkulModal = document.getElementById('matkul-modal');
+        const semModal = document.getElementById('semester-form-modal');
+        if ((matkulModal && matkulModal.style.display === 'flex') || (semModal && semModal.style.display === 'flex')) return;
+
+        currentX = e.touches[0].clientX;
+        const dx = currentX - startX;
+        const dy = e.touches[0].clientY - startY;
+
+        if (!gestureDecided) {
+            if (Math.abs(dx) < 14 && Math.abs(dy) < 14) return;
+            gestureDecided = true;
+            if (Math.abs(dx) > Math.abs(dy) * 1.35) {
+                if (!startedOpen && dx < 0) isDragging = true; // Geser ke kiri membuka dari kanan
+                if (startedOpen && dx > 0) isDragging = true; // Geser ke kanan menutup ke kanan
+            }
+            if (isDragging) {
+                drawer.style.transition = 'none';
+                drawer.style.visibility = 'visible';
+                if (!startedOpen) renderSemesterDrawerList();
+            }
+        }
+
+        if (!isDragging) return;
+        const drawerWidth = drawer.offsetWidth || window.innerWidth;
+        let progress = startedOpen ? 1 - dx / drawerWidth : -dx / drawerWidth;
+        progress = Math.max(0, Math.min(1, progress));
+
+        drawer.style.transform = `translate(${50 - progress * 100}%, 0)`;
+    }, { passive: true });
+
+    document.addEventListener('touchend', () => {
+        if (!isDragging) return;
+        isDragging = false;
+        const dx = currentX - startX;
+        const drawerWidth = drawer.offsetWidth || window.innerWidth;
+        const threshold = drawerWidth * 0.25;
+
+        if (!startedOpen) {
+            if (dx < -threshold) openRightSemesterDrawer();
+            else closeRightSemesterDrawer();
+        } else {
+            if (dx > threshold) closeRightSemesterDrawer();
+            else openRightSemesterDrawer();
+        }
+    });
 }
 
 function getOrCreateFabBackdrop() {
@@ -466,7 +964,7 @@ function initRoutineSelectAll() {
 function closeModal(id) {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
-    editId = null;
+    if (id !== 'semester-form-modal') editId = null;
     showFabAfterModal();
 }
 
@@ -514,18 +1012,21 @@ function toggleDismiss(type, id, dateStr) {
 }
 function isDismissed(type, id, dateStr) { return (JSON.parse(localStorage.getItem('nalaDismissed')) || []).includes(`${type}_${id}_${dateStr}`); }
 
-function deleteTask(id) {
-    if(!confirm('Hapus jadwal ini?')) return;
+async function deleteTask(id) {
+    const ok = await polaConfirm('Hapus jadwal ini dari daftar?', 'Hapus Jadwal', 'Hapus');
+    if(!ok) return;
     let tasks = JSON.parse(localStorage.getItem('nalaTasks')) || []; tasks = tasks.filter(t => t.id != id);
     localStorage.setItem('nalaTasks', JSON.stringify(tasks)); refreshAllViews();
 }
-function deleteRoutine(id) {
-    if(!confirm('Hapus rutinitas ini?')) return;
+async function deleteRoutine(id) {
+    const ok = await polaConfirm('Hapus rutinitas ini secara permanen?', 'Hapus Rutinitas', 'Hapus');
+    if(!ok) return;
     let routines = JSON.parse(localStorage.getItem('nalaRoutines')) || []; routines = routines.filter(r => r.id != id);
     localStorage.setItem('nalaRoutines', JSON.stringify(routines)); refreshAllViews();
 }
-function deleteLibur(id) {
-    if(!confirm('Hapus jadwal libur ini?')) return;
+async function deleteLibur(id) {
+    const ok = await polaConfirm('Hapus jadwal libur ini?', 'Hapus Libur', 'Hapus');
+    if(!ok) return;
     let libur = JSON.parse(localStorage.getItem('nalaLibur')) || []; libur = libur.filter(l => l.id != id);
     localStorage.setItem('nalaLibur', JSON.stringify(libur)); refreshAllViews();
 }
@@ -538,14 +1039,18 @@ function refreshAllViews() {
 }
 
 // --- BERANDA ---
-if(document.getElementById('schedule-list')) loadTodaySchedule();
+ensureSemesterInitialized();
+if(document.getElementById('schedule-list')) {
+    loadTodaySchedule();
+    refreshUserCoordinates();
+}
 
 async function loadTodaySchedule() {
     const list = document.getElementById('schedule-list'); const today = new Date();
     const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     const todayDayName = namaHari[today.getDay()]; let combinedSchedule = [];
     
-    let savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || []; let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
+    let savedMatkul = getActiveMatkulList(); let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
     let savedTasks = JSON.parse(localStorage.getItem('nalaTasks')) || []; let savedRoutines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
 
     let isHoliday = liburNasional[todayStr] || isUserHoliday(todayStr);
@@ -571,16 +1076,13 @@ async function loadTodaySchedule() {
         combinedSchedule.push({ type: 'rutin', id: r.id, name: r.name, badge: 'Rutinitas', time: r.time, endTime: '', color: r.color || 'var(--color-rutin)', desc: r.desc || 'Jadwal Rutinitas Mingguan' });
     });
 
-    const salatNames = ['Subuh', 'Zuhur', 'Asar', 'Maghrib', 'Isya'];
-    try {
-        const t = (await (await fetch('https://api.aladhan.com/v1/timingsByCity?city=Yogyakarta&country=Indonesia&method=11')).json()).data.timings;
-        ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'].forEach((w, i) => { combinedSchedule.push({ type: 'salat', id: salatNames[i], name: salatNames[i], badge: '', time: t[w], endTime: '', color: 'var(--color-salat)', desc: 'Waktu Salat' }); });
-    } catch (e) {
-        ['04:30', '11:45', '15:00', '17:45', '19:00'].forEach((w, i) => { combinedSchedule.push({ type: 'salat', id: salatNames[i], name: `${salatNames[i]}`, badge: '', time: w, endTime: '', color: 'var(--color-salat)', desc: 'Waktu Salat (Offline)' }); });
-    }
+    const salatList = await fetchSalatTimingsForDate(today, todayStr);
+    salatList.forEach((s) => {
+        combinedSchedule.push({ type: 'salat', id: s.name, name: s.name, badge: '', time: s.time, endTime: '', color: 'var(--color-salat)', desc: 'Waktu Salat' });
+    });
 
     combinedSchedule.sort((a, b) => a.time.localeCompare(b.time));
-    list.innerHTML = combinedSchedule.length ? '' : '<p style="text-align:center; color:var(--text-muted);">Semua jadwal hari ini sudah beres! 🔥</p>';
+    list.innerHTML = combinedSchedule.length ? '' : '<p style="text-align:center; color:var(--text-muted);">Semua jadwal hari ini sudah beres!</p>';
     
     combinedSchedule.forEach(item => {
         let completed = (item.type === 'tugas' || item.type === 'acara') ? (item.status === 'done') : isDismissed(item.type, item.id, todayStr);
@@ -647,6 +1149,11 @@ function updateOverdueTabLabel() {
     tabTerlewat.innerText = count > 0 ? `Tugas Terlewat (${count})` : 'Tugas Terlewat';
 }
 
+function jumpToTodayMonth() {
+    currentNavDate = new Date();
+    renderMonthCalendar();
+}
+
 if(document.getElementById('calendar-grid')) {
     const historyHeading = document.querySelector('.history-container h2, .history-container h3');
     if (historyHeading && historyHeading.innerText.trim() === 'Riwayat Selesai') {
@@ -677,14 +1184,33 @@ function renderMonthCalendar() {
     const realToday = new Date();
     const realTodayStr = `${realToday.getFullYear()}-${String(realToday.getMonth()+1).padStart(2, '0')}-${String(realToday.getDate()).padStart(2, '0')}`;
     
-    if(document.getElementById('month-display-text')) document.getElementById('month-display-text').innerText = currentNavDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+    const monthDisplayEl = document.getElementById('month-display-text');
+    if(monthDisplayEl) {
+        monthDisplayEl.innerText = currentNavDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+        const isDifferentMonth = year !== realToday.getFullYear() || month !== realToday.getMonth();
+        let jumpBtn = document.getElementById('today-jump-pill');
+        if (isDifferentMonth) {
+            if (!jumpBtn) {
+                jumpBtn = document.createElement('button');
+                jumpBtn.id = 'today-jump-pill';
+                jumpBtn.type = 'button';
+                jumpBtn.className = 'today-jump-pill';
+                jumpBtn.innerText = 'Hari Ini';
+                jumpBtn.onclick = jumpToTodayMonth;
+                monthDisplayEl.parentNode.appendChild(jumpBtn);
+            }
+            jumpBtn.style.display = 'inline-block';
+        } else if (jumpBtn) {
+            jumpBtn.style.display = 'none';
+        }
+    }
     if(document.getElementById('native-month-picker')) document.getElementById('native-month-picker').value = `${year}-${String(month+1).padStart(2, '0')}`;
     
     ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].forEach(d => { grid.innerHTML += `<div class="day-name">${d}</div>`; });
     const firstDay = new Date(year, month, 1).getDay(); const daysInMonth = new Date(year, month + 1, 0).getDate();
     const prevDays = new Date(year, month, 0).getDate();
     
-    let savedTasks = JSON.parse(localStorage.getItem('nalaTasks')) || []; let savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || []; let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
+    let savedTasks = JSON.parse(localStorage.getItem('nalaTasks')) || []; let savedMatkul = getActiveMatkulList(); let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
     
     for(let i = firstDay - 1; i >= 0; i--) { grid.innerHTML += `<div class="day-cell dimmed" onclick="changeMonth(-1)"><span class="day-number">${prevDays - i}</span></div>`; }
     for(let i = 1; i <= daysInMonth; i++) {
@@ -698,7 +1224,7 @@ function renderMonthCalendar() {
         if(isOffDay) matkulsToday = []; 
         
         matkulsToday = matkulsToday.filter(m => !overrides.some(o => o.matkulId === m.id && o.originalDate === currentLoopDate));
-        let movedIn = overrides.filter(o => o.newDate === currentLoopDate);
+        let movedIn = overrides.filter(o => o.newDate === currentLoopDate && savedMatkul.some(m => m.id === o.matkulId));
         if(matkulsToday.length > 0 || movedIn.length > 0) dayColors.push('var(--color-kuliah)');
         
         savedTasks.forEach(t => {
@@ -842,7 +1368,7 @@ function renderHistory(tabName) {
 function changeMonth(offset) { currentNavDate.setMonth(currentNavDate.getMonth() + offset); renderMonthCalendar(); }
 
 function showDayDetails(dateStr, dayName) {
-    let savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || []; 
+    let savedMatkul = getActiveMatkulList(); 
     let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
     let savedTasks = JSON.parse(localStorage.getItem('nalaTasks')) || [];
     
@@ -917,7 +1443,7 @@ function showDayDetails(dateStr, dayName) {
 }
 
 function openRescheduleModal(matkulId, origDate, activeDate) {
-    closeModal('day-detail-modal'); let savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || []; let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
+    closeModal('day-detail-modal'); let savedMatkul = getActiveMatkulList(); let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
     let original = savedMatkul.find(m => m.id === matkulId); let existing = overrides.find(o => o.matkulId === matkulId && o.originalDate === origDate);
     document.getElementById('res-matkulId').value = matkulId; document.getElementById('res-originalDate').value = origDate; 
     document.getElementById('res-date').value = existing ? existing.newDate : activeDate; document.getElementById('res-time').value = existing ? existing.newTime : original.jamMulai;
@@ -975,7 +1501,7 @@ function openModal(category) {
     
     if(category === 'Tugas Kuliah' || category === 'Kuliah') {
         const sel = document.getElementById('task-matkul-select'); sel.innerHTML = '<option value="">-- Pilih Kuliah --</option>';
-        let savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || []; 
+        let savedMatkul = getActiveMatkulList(); 
         let uniqueMatkul = [];
         savedMatkul.forEach(m => {
             if(!uniqueMatkul.includes(m.name)) { uniqueMatkul.push(m.name); sel.innerHTML += `<option value="${m.name}">${m.name}</option>`; }
@@ -1039,13 +1565,13 @@ function readCustomReminderFromInsert() {
     return { remindVal: null, remindUnit: 'minutes' };
 }
 
-function saveNewTask() {
+async function saveNewTask() {
     const category = document.getElementById('current-category').value; const name = document.getElementById('new-task-name').value;
     const reminderData = readCustomReminderFromInsert();
     
     if(category === 'Libur') {
         const date = document.getElementById('new-task-date').value; const endDateInput = document.getElementById('new-task-date-end'); const endDate = (endDateInput && endDateInput.value) ? endDateInput.value : date;
-        if(!name || !date) return alert("Nama dan Tanggal Mulai wajib diisi!");
+        if(!name || !date) { await polaAlert("Nama dan Tanggal Mulai wajib diisi!"); return; }
         let liburData = { id: editId ? editId : Date.now(), name: name, startDate: date, endDate: endDate };
         let savedLibur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
         if(editId) { const idx = savedLibur.findIndex(l => l.id == editId); if(idx !== -1) savedLibur[idx] = liburData; } else { savedLibur.push(liburData); }
@@ -1055,7 +1581,7 @@ function saveNewTask() {
         const time = document.getElementById('new-task-time').value;
         const descInput = document.getElementById('new-task-desc'); const desc = descInput ? descInput.value : '';
         let selectedDays = []; document.querySelectorAll('input[name="routine-days"]:checked').forEach(cb => selectedDays.push(cb.value));
-        if(!name || !time || selectedDays.length === 0) return alert("Nama, jam, dan hari wajib diisi!");
+        if(!name || !time || selectedDays.length === 0) { await polaAlert("Nama, jam, dan hari wajib diisi!"); return; }
         let routineData = { id: editId ? editId : Date.now(), name: name, time: time, days: selectedDays, color: document.getElementById('new-task-color').value, desc: desc, ...reminderData };
         let savedRoutines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
         if(editId) { const idx = savedRoutines.findIndex(r => r.id == editId); if(idx !== -1) savedRoutines[idx] = routineData; } else { savedRoutines.push(routineData); }
@@ -1064,11 +1590,11 @@ function saveNewTask() {
     else if(category === 'Kuliah') {
         const matkulName = document.getElementById('task-matkul-select').value; const date = document.getElementById('new-task-date').value; const time = document.getElementById('new-task-time').value;
         const endTime = document.getElementById('new-task-time-end').value; const ruang = document.getElementById('new-task-ruang').value;
-        if(!matkulName || !date || !time) return alert("Pilih Kuliah, Tanggal, dan Jam Mulai!");
+        if(!matkulName || !date || !time) { await polaAlert("Pilih Kuliah, Tanggal, dan Jam Mulai!"); return; }
         
-        let savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || []; 
+        let savedMatkul = getActiveMatkulList(); 
         let orig = savedMatkul.find(m => m.name === matkulName);
-        if(!orig) return alert("Data kuliah tidak ditemukan!");
+        if(!orig) { await polaAlert("Data kuliah tidak ditemukan pada semester aktif!"); return; }
 
         let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
         overrides.push({ matkulId: orig.id, originalDate: 'EXTRA_'+Date.now(), newDate: date, newTime: time, newEndTime: endTime, newRuangan: ruang || orig.ruangan, newDosen: orig.dosen, ...reminderData });
@@ -1076,7 +1602,7 @@ function saveNewTask() {
     }
     else {
         const time = document.getElementById('new-task-time').value; const date = document.getElementById('new-task-date').value; 
-        if(!name || !date || !time) return alert("Semua wajib diisi!"); 
+        if(!name || !date || !time) { await polaAlert("Nama kegiatan, tanggal, dan jam wajib diisi!"); return; } 
         
         let taskData = { id: editId ? editId : Date.now(), name: name, date: date, time: time, category: category, status: 'pending', deskripsi: document.getElementById('new-task-desc').value, ...reminderData };
         
@@ -1108,7 +1634,11 @@ function saveNewTask() {
 }
 
 // --- MATKUL ---
-if(document.getElementById('matkul-list')) renderMatkulList();
+if(document.getElementById('matkul-list')) {
+    setupMatkulSemesterUI();
+    renderMatkulList();
+}
+
 function openMatkulModal() {
     ensureReminderFieldsInjected();
     editId = null;
@@ -1119,10 +1649,11 @@ function openMatkulModal() {
     document.getElementById('matkul-modal').style.display = 'flex';
 }
 
-function saveMatkul() {
+async function saveMatkul() {
     const name = document.getElementById('m-name').value; const hari = document.getElementById('m-hari').value; const jamM = document.getElementById('m-jamMulai').value;
-    if(!name || !hari || !jamM) return alert("Semua wajib diisi!");
+    if(!name || !hari || !jamM) { await polaAlert("Nama mata kuliah, hari, dan jam mulai wajib diisi!"); return; }
 
+    const activeSemId = getActiveSemesterId();
     const mRemindValEl = document.getElementById('m-remind-val');
     const mRemindUnitEl = document.getElementById('m-remind-unit');
     const parsedMRemind = mRemindValEl ? parseInt(mRemindValEl.value, 10) : NaN;
@@ -1130,7 +1661,18 @@ function saveMatkul() {
     const remindUnit = mRemindUnitEl ? mRemindUnitEl.value : 'minutes';
 
     let savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
-    let matkulData = { id: editId ? editId : Date.now(), name: name, hari: hari, jamMulai: jamM, jamSelesai: document.getElementById('m-jamSelesai').value, dosen: document.getElementById('m-dosen').value, ruangan: document.getElementById('m-ruangan').value, remindVal: remindVal, remindUnit: remindUnit };
+    let matkulData = {
+        id: editId ? editId : Date.now(),
+        semesterId: activeSemId,
+        name: name,
+        hari: hari,
+        jamMulai: jamM,
+        jamSelesai: document.getElementById('m-jamSelesai').value,
+        dosen: document.getElementById('m-dosen').value,
+        ruangan: document.getElementById('m-ruangan').value,
+        remindVal: remindVal,
+        remindUnit: remindUnit
+    };
     if(editId) { const idx = savedMatkul.findIndex(m => m.id == editId); if(idx !== -1) savedMatkul[idx] = matkulData; } else { savedMatkul.push(matkulData); }
     localStorage.setItem('nalaMatkul', JSON.stringify(savedMatkul));
     closeModal('matkul-modal');
@@ -1138,8 +1680,13 @@ function saveMatkul() {
 }
 
 function renderMatkulList() {
-    const list = document.getElementById('matkul-list'); if(!list) return; list.innerHTML = ''; let savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
-    if(savedMatkul.length === 0) { list.innerHTML = '<p style="text-align:center; color:var(--text-muted);">Belum ada jadwal kuliah.</p>'; return; }
+    const list = document.getElementById('matkul-list'); if(!list) return;
+    const activeSem = getActiveSemesterObj();
+    const subEl = document.getElementById('active-semester-subtitle');
+    if (subEl && activeSem) subEl.innerText = activeSem.name;
+
+    list.innerHTML = ''; let savedMatkul = getActiveMatkulList();
+    if(savedMatkul.length === 0) { list.innerHTML = `<p style="text-align:center; color:var(--text-muted);">Belum ada jadwal kuliah di ${activeSem ? activeSem.name : 'semester ini'}.</p>`; return; }
     
     const namaHariUrut = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
     savedMatkul.sort((a, b) => {
@@ -1197,14 +1744,16 @@ function editMatkul(id) {
     }
 }
 
-function deleteMatkul(id) {
-    if(!confirm('Hapus jadwal kuliah ini?')) return;
+async function deleteMatkul(id) {
+    const ok = await polaConfirm('Hapus jadwal mata kuliah ini?', 'Hapus Mata Kuliah', 'Hapus');
+    if(!ok) return;
     let savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || []; savedMatkul = savedMatkul.filter(m => m.id != id);
     localStorage.setItem('nalaMatkul', JSON.stringify(savedMatkul));
     refreshAllViews();
 }
 
 document.addEventListener("DOMContentLoaded", () => { 
+    ensurePolaDialogExists();
     document.querySelectorAll('.fab').forEach(f => f.innerHTML = iPls);
     getOrCreateFabBackdrop();
     initRoutineSelectAll();

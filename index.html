@@ -14,42 +14,38 @@
         <video id="intro-video" src="assets/media/intro.mp4" autoplay muted playsinline></video>
     </div>
 
-    <!-- PANEL GESER KIRI ALA GEMINI -->
-    <div class="drawer-backdrop" id="drawer-backdrop" onclick="closeSideDrawer()"></div>
+    <!-- HALAMAN GESER KIRI FULL-SCREEN ALA GEMINI -->
     <aside class="side-drawer" id="side-drawer" aria-hidden="true">
         <div class="drawer-header">
             <div>
                 <h2 class="drawer-brand">Pola<span class="brand-dot">.</span></h2>
-                <span class="drawer-subtitle">Arsip & Pengaturan</span>
+                <span class="drawer-subtitle" id="drawer-section-label">Data Rutinitas</span>
             </div>
-            <button class="drawer-close-btn" onclick="closeSideDrawer()" aria-label="Tutup panel">
-                <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round">
-                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                    <line x1="6" y1="6" x2="18" y2="18"></line>
+            <button class="drawer-close-btn" onclick="closeSideDrawer()" aria-label="Kembali ke Beranda">
+                <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="9 18 15 12 9 6"></polyline>
                 </svg>
             </button>
         </div>
 
-        <div class="drawer-tabs">
-            <button class="drawer-tab active" id="dtab-rutinitas" onclick="switchDrawerTab('Rutinitas')">Rutinitas</button>
-            <button class="drawer-tab" id="dtab-acara" onclick="switchDrawerTab('Acara')">Acara</button>
-            <button class="drawer-tab" id="dtab-libur" onclick="switchDrawerTab('Libur')">Libur</button>
-        </div>
+        <div class="drawer-scroll-area" id="drawer-scroll-area">
+            <div id="drawer-content-list"></div>
 
-        <div class="drawer-toolbar">
-            <span id="drawer-section-label">Daftar Rutinitas</span>
-            <button class="drawer-add-btn" id="drawer-add-btn" onclick="openModalFromDrawer()">+ Tambah</button>
-        </div>
-
-        <div class="drawer-body" id="drawer-content-list"></div>
-
-        <div class="drawer-footer">
-            <span class="drawer-footer-title">Cadangkan Data Lokal</span>
-            <div class="drawer-backup-btns">
-                <button class="drawer-util-btn" onclick="exportPolaBackup()">Export JSON</button>
-                <button class="drawer-util-btn" onclick="triggerImportBackup()">Import JSON</button>
+            <div class="drawer-bottom-menu">
+                <span class="drawer-menu-heading">Lihat Data Lainnya</span>
+                <button class="drawer-option-btn active" id="dopt-rutinitas" onclick="switchDrawerTab('Rutinitas')">
+                    <span>Data Rutinitas</span>
+                    <small id="dcount-rutinitas">0</small>
+                </button>
+                <button class="drawer-option-btn" id="dopt-acara" onclick="switchDrawerTab('Acara')">
+                    <span>Data Acara</span>
+                    <small id="dcount-acara">0</small>
+                </button>
+                <button class="drawer-option-btn" id="dopt-libur" onclick="switchDrawerTab('Libur')">
+                    <span>Data Hari Libur</span>
+                    <small id="dcount-libur">0</small>
+                </button>
             </div>
-            <input type="file" id="import-backup-input" accept=".json,application/json" style="display:none" onchange="handleImportBackup(event)">
         </div>
     </aside>
 

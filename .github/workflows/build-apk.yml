@@ -46,7 +46,6 @@ jobs:
               const bg = { r: 250, g: 247, b: 242, alpha: 1 };
               const transparent = { r: 0, g: 0, b: 0, alpha: 0 };
 
-              // Ekstrak tulisan "Pola." dengan warna aslinya & siluet putih
               const { data, info } = await sharp("assets/icons/logo.png")
                 .ensureAlpha()
                 .raw()
@@ -71,10 +70,10 @@ jobs:
                 .png()
                 .toBuffer();
 
-              // 1. Ikon Launcher HP (Tulisan Pola. diperbesar maksimal dalam safe zone 66%)
+              // 1. Ikon Launcher HP & Kartu Notifikasi (Diperbesar ke 840px)
               await sharp(croppedText)
-                .resize(660, 660, { fit: "contain", background: transparent })
-                .extend({ top: 182, bottom: 182, left: 182, right: 182, background: transparent })
+                .resize(840, 840, { fit: "contain", background: transparent })
+                .extend({ top: 92, bottom: 92, left: 92, right: 92, background: transparent })
                 .png()
                 .toFile("assets/icon-foreground.png");
 
@@ -85,19 +84,19 @@ jobs:
                 .toFile("assets/icon-background.png");
 
               await sharp(croppedText)
-                .resize(780, 780, { fit: "contain", background: bg })
-                .extend({ top: 122, bottom: 122, left: 122, right: 122, background: bg })
+                .resize(880, 880, { fit: "contain", background: bg })
+                .extend({ top: 72, bottom: 72, left: 72, right: 72, background: bg })
                 .png()
                 .toFile("assets/icon-only.png");
 
-              // 2. Ikon Kecil Status Bar Notifikasi
+              // 2. Ikon Kecil Status Bar Notifikasi (Maksimal 92px)
               if (fs.existsSync("assets/icons/ic_stat_pola.png")) {
                 fs.copyFileSync("assets/icons/ic_stat_pola.png", "android/app/src/main/res/drawable/ic_stat_pola.png");
               } else {
                 await sharp(whiteSilhouette, { raw: { width: info.width, height: info.height, channels: 4 } })
                   .trim()
-                  .resize(86, 86, { fit: "contain", background: transparent })
-                  .extend({ top: 5, bottom: 5, left: 5, right: 5, background: transparent })
+                  .resize(92, 92, { fit: "contain", background: transparent })
+                  .extend({ top: 2, bottom: 2, left: 2, right: 2, background: transparent })
                   .png()
                   .toFile("android/app/src/main/res/drawable/ic_stat_pola.png");
               }

@@ -5,6 +5,7 @@ let currentHistoryTab = 'Tugas Kuliah';
 let currentDrawerTab = 'Rutinitas';
 let editSemesterId = null;
 let pendingBackupPayload = null;
+let scheduleRenderToken = 0;
 const fetchingHolidayYears = new Set();
 
 // Data dasar libur nasional (cadangan offline instan)
@@ -61,9 +62,57 @@ const iPin = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${st
 const iRef = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${strk}" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>`;
 const iBkp = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="var(--btn-primary)" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`;
 
+// --- HELPER KETAHANAN KODE (SANITASI, TANGGAL LOKAL, FETCH TIMEOUT) ---
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&')
+        .replace(/</g, '<')
+        .replace(/>/g, '>')
+        .replace(/"/g, '"')
+        .replace(/'/g, '\x27');
+}
+
+function parseLocalDate(dateStr) {
+    if (!dateStr) return new Date(NaN);
+    const parts = String(dateStr).split('-');
+    if (parts.length !== 3) return new Date(dateStr);
+    return new Date(
+        parseInt(parts[0], 10),
+        parseInt(parts[1], 10) - 1,
+        parseInt(parts[2], 10),
+        0, 0, 0, 0
+    );
+}
+
+function parseLocalDateTime(dateStr, timeStr = '23:59') {
+    const base = parseLocalDate(dateStr);
+    if (isNaN(base.getTime())) return base;
+    if (timeStr && String(timeStr).includes(':')) {
+        const tParts = String(timeStr).split(':');
+        const hh = parseInt(tParts[0], 10);
+        const mm = parseInt(tParts[1], 10);
+        if (!isNaN(hh) && !isNaN(mm)) {
+            base.setHours(hh, mm, 0, 0);
+        }
+    }
+    return base;
+}
+
+async function fetchWithTimeout(url, timeoutMs = 4000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, { signal: controller.signal });
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 // --- PEMBERSIH CACHE LAMA OTOMATIS ---
 function cleanupOldCache() {
     const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const curYear = now.getFullYear();
     const curMonth = now.getMonth() + 1;
     const minYm = curYear * 12 + curMonth - 1;
@@ -89,6 +138,24 @@ function cleanupOldCache() {
             }
         }
     });
+
+    // Bersihkan riwayat centang (salat/rutinitas) yang lebih dari 7 hari lalu
+    try {
+        const dismissed = JSON.parse(localStorage.getItem('nalaDismissed'));
+        if (Array.isArray(dismissed) && dismissed.length > 0) {
+            const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+            const filtered = dismissed.filter((entry) => {
+                const match = String(entry).match(/_(\d{4}-\d{2}-\d{2})$/);
+                if (!match) return false;
+                const entryDate = parseLocalDate(match[1]);
+                if (isNaN(entryDate.getTime())) return false;
+                return (todayStart - entryDate) <= sevenDaysMs;
+            });
+            if (filtered.length !== dismissed.length) {
+                localStorage.setItem('nalaDismissed', JSON.stringify(filtered));
+            }
+        }
+    } catch (e) {}
 }
 
 // --- CUSTOM DIALOG BERTEMA POLA ---
@@ -132,7 +199,7 @@ function polaConfirm(message, title = 'Konfirmasi', confirmLabel = 'Ya, Lanjutka
         const btns = document.getElementById('pola-dialog-btns');
         btns.innerHTML = `
             <button class="btn-cancel" id="pola-dialog-cancel">Batal</button>
-            <button class="btn-save" id="pola-dialog-confirm">${confirmLabel}</button>
+            <button class="btn-save" id="pola-dialog-confirm">${escapeHtml(confirmLabel)}</button>
         `;
         overlay.style.display = 'flex';
         document.getElementById('pola-dialog-cancel').onclick = () => {
@@ -172,10 +239,10 @@ function getAutoHolidayName(dateStr) {
 
 function isUserHoliday(dateStr) {
     let savedLibur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
-    let tDate = new Date(dateStr); tDate.setHours(0, 0, 0, 0);
+    let tDate = parseLocalDate(dateStr);
     for (let l of savedLibur) {
-        let sDate = new Date(l.startDate); sDate.setHours(0, 0, 0, 0);
-        let eDate = new Date(l.endDate || l.startDate); eDate.setHours(0, 0, 0, 0);
+        let sDate = parseLocalDate(l.startDate);
+        let eDate = parseLocalDate(l.endDate || l.startDate);
         if (tDate >= sDate && tDate <= eDate) return l.name;
     }
     return null;
@@ -206,7 +273,7 @@ async function ensureAutoHolidaysForYear(year) {
     try {
         let loaded = false;
         try {
-            const res = await fetch(`https://api-harilibur.vercel.app/api?year=${year}`);
+            const res = await fetchWithTimeout(`https://api-harilibur.vercel.app/api?year=${year}`, 4000);
             if (res.ok) {
                 const data = await res.json();
                 if (Array.isArray(data) && data.length > 0) {
@@ -226,7 +293,7 @@ async function ensureAutoHolidaysForYear(year) {
 
         if (!loaded) {
             try {
-                const res2 = await fetch(`https://dayoffapi.vercel.app/api?year=${year}`);
+                const res2 = await fetchWithTimeout(`https://dayoffapi.vercel.app/api?year=${year}`, 4000);
                 if (res2.ok) {
                     const data2 = await res2.json();
                     if (Array.isArray(data2) && data2.length > 0) {
@@ -247,7 +314,7 @@ async function ensureAutoHolidaysForYear(year) {
 
         if (!loaded) {
             try {
-                const res3 = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${year}/ID`);
+                const res3 = await fetchWithTimeout(`https://date.nager.at/api/v3/PublicHolidays/${year}/ID`, 4000);
                 if (res3.ok) {
                     const data3 = await res3.json();
                     if (Array.isArray(data3) && data3.length > 0) {
@@ -305,8 +372,9 @@ function updateLocationPillUI(statusText = null, spinning = false) {
 
 async function resolveCityName(lat, lng) {
     try {
-        const res = await fetch(
-            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=id`
+        const res = await fetchWithTimeout(
+            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=id`,
+            4000
         );
         if (res.ok) {
             const data = await res.json();
@@ -332,13 +400,14 @@ function refreshUserCoordinates(manual = false) {
             async (pos) => {
                 const lat = Number(pos.coords.latitude.toFixed(4));
                 const lng = Number(pos.coords.longitude.toFixed(4));
+                // Sensitif terhadap perpindahan > ~6,5 km (mis. Jogja -> Solo / Bali)
                 const movedFar =
                     current.isFallback ||
-                    Math.abs(lat - current.lat) > 0.12 ||
-                    Math.abs(lng - current.lng) > 0.12;
+                    Math.abs(lat - current.lat) > 0.06 ||
+                    Math.abs(lng - current.lng) > 0.06;
 
                 let cityName = (!movedFar && current.city) ? current.city : '';
-                if (!cityName || manual) {
+                if (!cityName || manual || movedFar) {
                     const resolved = await resolveCityName(lat, lng);
                     if (resolved) cityName = resolved;
                 }
@@ -359,7 +428,7 @@ function refreshUserCoordinates(manual = false) {
                             localStorage.removeItem(k);
                         }
                     });
-                    if (document.getElementById('schedule-list')) await loadTodaySchedule();
+                    if (document.getElementById('schedule-list')) loadTodaySchedule();
                     if (typeof syncAndroidAlarms === 'function') syncAndroidAlarms();
                 }
                 resolve(updated);
@@ -381,19 +450,17 @@ function refreshUserCoordinates(manual = false) {
             {
                 enableHighAccuracy: manual,
                 timeout: manual ? 10000 : 6000,
-                maximumAge: manual ? 0 : 30 * 60 * 1000
+                maximumAge: manual ? 0 : 15 * 60 * 1000
             }
         );
     });
 }
 
-async function fetchSalatTimingsForDate(dateObj, dateStr) {
+function getCachedSalatTimingsSync(dateObj, dateStr) {
     const loc = getSavedCoordinates();
     const locKey = `${loc.lat.toFixed(2)}_${loc.lng.toFixed(2)}`;
     const yyyy = dateObj.getFullYear();
     const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
-    const dd = String(dateObj.getDate()).padStart(2, '0');
-
     const monthCacheKey = `nalaSalatMonth_${yyyy}_${mm}_${locKey}`;
     try {
         const cachedMonth = JSON.parse(localStorage.getItem(monthCacheKey));
@@ -401,10 +468,24 @@ async function fetchSalatTimingsForDate(dateObj, dateStr) {
             return cachedMonth[dateStr];
         }
     } catch (e) {}
+    return null;
+}
+
+async function fetchSalatTimingsForDate(dateObj, dateStr) {
+    const syncHit = getCachedSalatTimingsSync(dateObj, dateStr);
+    if (syncHit) return syncHit;
+
+    const loc = getSavedCoordinates();
+    const locKey = `${loc.lat.toFixed(2)}_${loc.lng.toFixed(2)}`;
+    const yyyy = dateObj.getFullYear();
+    const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const dd = String(dateObj.getDate()).padStart(2, '0');
+    const monthCacheKey = `nalaSalatMonth_${yyyy}_${mm}_${locKey}`;
 
     try {
-        const res = await fetch(
-            `https://api.aladhan.com/v1/calendar/${yyyy}/${Number(mm)}?latitude=${loc.lat}&longitude=${loc.lng}&method=20`
+        const res = await fetchWithTimeout(
+            `https://api.aladhan.com/v1/calendar/${yyyy}/${Number(mm)}?latitude=${loc.lat}&longitude=${loc.lng}&method=20`,
+            4000
         );
         if (res.ok) {
             const json = await res.json();
@@ -437,8 +518,9 @@ async function fetchSalatTimingsForDate(dateObj, dateStr) {
     } catch (e) {}
 
     try {
-        const resSingle = await fetch(
-            `https://api.aladhan.com/v1/timings/${dd}-${mm}-${yyyy}?latitude=${loc.lat}&longitude=${loc.lng}&method=20`
+        const resSingle = await fetchWithTimeout(
+            `https://api.aladhan.com/v1/timings/${dd}-${mm}-${yyyy}?latitude=${loc.lat}&longitude=${loc.lng}&method=20`,
+            4000
         );
         if (resSingle.ok) {
             const t = (await resSingle.json()).data.timings;
@@ -955,7 +1037,6 @@ async function executeBackupImport() {
     closeModal('backup-modal');
     updateLocationPillUI(null, false);
     refreshAllViews();
-    if (typeof syncAndroidAlarms === 'function') syncAndroidAlarms();
 
     await polaAlert('Seluruh jadwal dan pengaturan berhasil dipulihkan!', 'Pemulihan Selesai');
 }
@@ -1100,35 +1181,36 @@ function renderSideDrawerContent() {
     ensureSideDrawerStickyFooter();
     updateDrawerOptionCounts();
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     if (currentDrawerTab === 'Rutinitas') {
         if (labelEl) labelEl.innerText = 'Rutinitas';
         const routines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
         if (routines.length === 0) {
-            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada rutinitas.</p>';
+            container.innerHTML = '<div class="drawer-empty-state"><p>Belum ada rutinitas.</p></div>';
             return;
         }
         let html = '<div class="drawer-sub-heading">Jadwal Rutin Aktif</div>';
         routines.forEach((r) => {
+            const daysText = r.days.length === 7 ? 'Setiap Hari' : escapeHtml(r.days.join(', '));
             html += `
                 <div class="card" onclick="toggleDetail(this)">
-                    <div class="card-header" style="background-color: ${r.color || 'var(--color-rutin)'};">
+                    <div class="card-header" style="background-color: ${escapeHtml(r.color || 'var(--color-rutin)')};">
                         <div class="card-header-top">
                             <div class="card-title-group">
                                 <div>
-                                    <h3>${r.name}</h3>
-                                    <small class="time-badge">${iClk} ${r.time} • ${r.days.length === 7 ? 'Setiap Hari' : r.days.join(', ')}</small>
+                                    <h3>${escapeHtml(r.name)}</h3>
+                                    <small class="time-badge">${iClk} ${escapeHtml(r.time)} • ${daysText}</small>
                                 </div>
                             </div>
                         </div>
                     </div>
                     <div class="card-detail">
-                        <p>${r.desc || 'Rutinitas Mingguan'}</p>
+                        <p>${escapeHtml(r.desc || 'Rutinitas Mingguan')}</p>
                         <div class="card-actions three-btns">
-                            <button class="icon-btn delete" onclick="event.stopPropagation(); deleteRoutine(${r.id})">${iDel} Hapus</button>
-                            <div><button class="icon-btn" onclick="event.stopPropagation(); closeSideDrawer(); openEditRoutine(${r.id})">${iEdt} Edit</button></div>
+                            <button class="icon-btn delete" onclick="event.stopPropagation(); deleteRoutine(${Number(r.id)})">${iDel} Hapus</button>
+                            <div><button class="icon-btn" onclick="event.stopPropagation(); closeSideDrawer(); openEditRoutine(${Number(r.id)})">${iEdt} Edit</button></div>
                         </div>
                     </div>
                 </div>`;
@@ -1139,13 +1221,17 @@ function renderSideDrawerContent() {
         const tasks = JSON.parse(localStorage.getItem('nalaTasks')) || [];
         const acaras = tasks.filter((t) => t.category === 'Acara');
 
+        if (acaras.length === 0) {
+            container.innerHTML = '<div class="drawer-empty-state"><p>Belum ada acara.</p></div>';
+            return;
+        }
+
         const upcomingAcaras = [];
         const pastAcaras = [];
 
         acaras.forEach((t) => {
             const endStr = t.endDate || t.date;
-            const endDateObj = new Date(endStr);
-            endDateObj.setHours(0, 0, 0, 0);
+            const endDateObj = parseLocalDate(endStr);
             if (endDateObj < today) pastAcaras.push(t);
             else upcomingAcaras.push(t);
         });
@@ -1153,34 +1239,29 @@ function renderSideDrawerContent() {
         upcomingAcaras.sort((a, b) => a.date.localeCompare(b.date));
         pastAcaras.sort((a, b) => b.date.localeCompare(a.date));
 
-        if (acaras.length === 0) {
-            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada acara.</p>';
-            return;
-        }
-
         const buildAcaraCard = (t, isPast) => {
             const dateText = t.endDate && t.endDate !== t.date ? `${formatShortDate(t.date)} s/d ${formatShortDate(t.endDate)}` : formatShortDate(t.date);
             const opacityStyle = isPast ? 'opacity: 0.72;' : '';
             const badgeHtml = isPast ? '<span class="tag-pill">Terlewat</span>' : '';
             return `
                 <div class="card" onclick="toggleDetail(this)" style="${opacityStyle}">
-                    <div class="card-header" style="background-color: ${t.color || 'var(--color-acara)'};">
+                    <div class="card-header" style="background-color: ${escapeHtml(t.color || 'var(--color-acara)')};">
                         <div class="card-header-top">
                             <div class="card-title-group">
                                 <div>
-                                    <h3>${t.name}</h3>
-                                    <small class="time-badge">${iDat} ${dateText}   ${iClk} ${t.time}${t.endTime ? ' - ' + t.endTime : ''}</small>
+                                    <h3>${escapeHtml(t.name)}</h3>
+                                    <small class="time-badge">${iDat} ${escapeHtml(dateText)}   ${iClk} ${escapeHtml(t.time)}${t.endTime ? ' - ' + escapeHtml(t.endTime) : ''}</small>
                                 </div>
                             </div>
                             ${badgeHtml}
                         </div>
                     </div>
                     <div class="card-detail">
-                        <p>${t.deskripsi || 'Tidak ada deskripsi.'}</p>
-                        ${t.ruang ? `<div style="margin-top:10px; padding-top:10px; border-top:1px dashed var(--border-line); font-size:12px;"><span>Tempat:</span> <strong>${t.ruang}</strong></div>` : ''}
+                        <p>${escapeHtml(t.deskripsi || 'Tidak ada deskripsi.')}</p>
+                        ${t.ruang ? `<div style="margin-top:10px; padding-top:10px; border-top:1px dashed var(--border-line); font-size:12px;"><span>Tempat:</span> <strong>${escapeHtml(t.ruang)}</strong></div>` : ''}
                         <div class="card-actions three-btns">
-                            <button class="icon-btn delete" onclick="event.stopPropagation(); deleteTask(${t.id})">${iDel} Hapus</button>
-                            <div><button class="icon-btn" onclick="event.stopPropagation(); closeSideDrawer(); openEditTask(${t.id}, 'Acara')">${iEdt} Edit</button></div>
+                            <button class="icon-btn delete" onclick="event.stopPropagation(); deleteTask(${Number(t.id)})">${iDel} Hapus</button>
+                            <div><button class="icon-btn" onclick="event.stopPropagation(); closeSideDrawer(); openEditTask(${Number(t.id)}, 'Acara')">${iEdt} Edit</button></div>
                         </div>
                     </div>
                 </div>`;
@@ -1206,7 +1287,7 @@ function renderSideDrawerContent() {
         const libur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
 
         if (libur.length === 0) {
-            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada jadwal hari libur pribadi.</p>';
+            container.innerHTML = '<div class="drawer-empty-state"><p>Belum ada jadwal hari libur pribadi.</p></div>';
             return;
         }
 
@@ -1215,8 +1296,7 @@ function renderSideDrawerContent() {
 
         libur.forEach((l) => {
             const endStr = l.endDate || l.startDate;
-            const endDateObj = new Date(endStr);
-            endDateObj.setHours(0, 0, 0, 0);
+            const endDateObj = parseLocalDate(endStr);
             if (endDateObj < today) pastLibur.push(l);
             else upcomingLibur.push(l);
         });
@@ -1234,8 +1314,8 @@ function renderSideDrawerContent() {
                         <div class="card-header-top">
                             <div class="card-title-group">
                                 <div>
-                                    <h3>${l.name}</h3>
-                                    <small class="time-badge">${iDat} ${dateText}</small>
+                                    <h3>${escapeHtml(l.name)}</h3>
+                                    <small class="time-badge">${iDat} ${escapeHtml(dateText)}</small>
                                 </div>
                             </div>
                             ${badgeHtml}
@@ -1244,8 +1324,8 @@ function renderSideDrawerContent() {
                     <div class="card-detail">
                         <p>Libur Kampus / Pribadi</p>
                         <div class="card-actions three-btns">
-                            <button class="icon-btn delete" onclick="event.stopPropagation(); deleteLibur(${l.id})">${iDel} Hapus</button>
-                            <div><button class="icon-btn" onclick="event.stopPropagation(); closeSideDrawer(); openEditLibur(${l.id})">${iEdt} Edit</button></div>
+                            <button class="icon-btn delete" onclick="event.stopPropagation(); deleteLibur(${Number(l.id)})">${iDel} Hapus</button>
+                            <div><button class="icon-btn" onclick="event.stopPropagation(); closeSideDrawer(); openEditLibur(${Number(l.id)})">${iEdt} Edit</button></div>
                         </div>
                     </div>
                 </div>`;
@@ -1380,10 +1460,10 @@ function setupMatkulSemesterUI() {
             <div class="drawer-scroll-area">
                 <div class="drawer-sub-heading">Daftar Semester</div>
                 <div id="semester-list-container"></div>
-                <div class="drawer-bottom-menu">
-                    <span class="drawer-menu-heading">Tambah</span>
-                    <button class="drawer-option-btn primary-action" onclick="openNewSemesterModal()">+ Tambah Semester Baru</button>
-                </div>
+            </div>
+            <div class="drawer-sticky-footer">
+                <span class="drawer-menu-heading">Tambah</span>
+                <button type="button" class="drawer-option-btn primary-action" onclick="openNewSemesterModal()">+ Tambah Semester Baru</button>
             </div>
         `;
         document.body.appendChild(aside);
@@ -1456,18 +1536,19 @@ function renderSemesterDrawerList() {
     semesters.forEach((sem) => {
         const isActive = sem.id === activeId;
         const count = allMatkul.filter((m) => m.semesterId === sem.id).length;
+        const safeSemId = escapeHtml(sem.id);
         html += `
-            <div class="semester-card ${isActive ? 'active-sem' : ''}" onclick="selectSemesterFromDrawer('${sem.id}')">
+            <div class="semester-card ${isActive ? 'active-sem' : ''}" onclick="selectSemesterFromDrawer('${safeSemId}')">
                 <div class="semester-card-top">
                     <div>
-                        <div class="semester-card-title">${sem.name}</div>
+                        <div class="semester-card-title">${escapeHtml(sem.name)}</div>
                         <div class="semester-card-meta">${count} Mata Kuliah</div>
                     </div>
                     ${isActive ? '<span class="semester-badge-active">Aktif</span>' : ''}
                 </div>
                 <div class="semester-card-actions">
-                    ${semesters.length > 1 ? `<button class="icon-btn delete" onclick="event.stopPropagation(); deleteSemesterItem('${sem.id}')">${iDel} Hapus</button>` : ''}
-                    <button class="icon-btn" onclick="event.stopPropagation(); openEditSemesterModal('${sem.id}')">${iEdt} Ubah Nama</button>
+                    ${semesters.length > 1 ? `<button class="icon-btn delete" onclick="event.stopPropagation(); deleteSemesterItem('${safeSemId}')">${iDel} Hapus</button>` : ''}
+                    <button class="icon-btn" onclick="event.stopPropagation(); openEditSemesterModal('${safeSemId}')">${iEdt} Ubah Nama</button>
                 </div>
             </div>
         `;
@@ -1553,8 +1634,18 @@ async function deleteSemesterItem(semId) {
     localStorage.setItem('nalaSemesters', JSON.stringify(remaining));
 
     let allMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
+    const deletedMatkulIds = new Set(
+        allMatkul.filter((m) => m.semesterId === semId).map((m) => String(m.id))
+    );
     allMatkul = allMatkul.filter((m) => m.semesterId !== semId);
     localStorage.setItem('nalaMatkul', JSON.stringify(allMatkul));
+
+    // Bersihkan jadwal pengganti/pindahan milik mata kuliah yang ikut terhapus
+    if (deletedMatkulIds.size > 0) {
+        let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
+        overrides = overrides.filter((o) => !deletedMatkulIds.has(String(o.matkulId)));
+        localStorage.setItem('nalaOverrides', JSON.stringify(overrides));
+    }
 
     if (activeId === semId) {
         localStorage.setItem('nalaActiveSemesterId', remaining[0].id);
@@ -1784,9 +1875,9 @@ function formatShortDate(dateStr) {
 // LOGIKA RENTANG TANGGAL UNTUK ACARA
 function isDateInAcaraRange(dateStr, acara) {
     if (!acara.endDate || acara.date === acara.endDate) return dateStr === acara.date;
-    let tDate = new Date(dateStr); tDate.setHours(0,0,0,0);
-    let sDate = new Date(acara.date); sDate.setHours(0,0,0,0);
-    let eDate = new Date(acara.endDate); eDate.setHours(0,0,0,0);
+    let tDate = parseLocalDate(dateStr);
+    let sDate = parseLocalDate(acara.date);
+    let eDate = parseLocalDate(acara.endDate);
     return (tDate >= sDate && tDate <= eDate);
 }
 
@@ -1826,12 +1917,25 @@ async function deleteLibur(id) {
     let libur = JSON.parse(localStorage.getItem('nalaLibur')) || []; libur = libur.filter(l => l.id != id);
     localStorage.setItem('nalaLibur', JSON.stringify(libur)); refreshAllViews();
 }
+async function deleteOverride(matkulId, originalDate) {
+    const ok = await polaConfirm('Hapus jadwal kuliah pengganti/pindahan ini?', 'Hapus Jadwal Kuliah', 'Hapus');
+    if(!ok) return;
+    let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
+    overrides = overrides.filter(o => !(String(o.matkulId) === String(matkulId) && String(o.originalDate) === String(originalDate)));
+    localStorage.setItem('nalaOverrides', JSON.stringify(overrides));
+    const detailModal = document.getElementById('day-detail-modal');
+    if (detailModal && detailModal.style.display === 'flex') {
+        closeModal('day-detail-modal');
+    }
+    refreshAllViews();
+}
 
 function refreshAllViews() {
     if(document.getElementById('schedule-list')) loadTodaySchedule();
     if(document.getElementById('side-drawer')) renderSideDrawerContent();
     if(document.getElementById('calendar-grid')) { renderMonthCalendar(); renderUpcomingTasks(); renderHistory(currentHistoryTab); }
     if(document.getElementById('matkul-list')) renderMatkulList();
+    if(typeof syncAndroidAlarms === 'function') syncAndroidAlarms();
 }
 
 // --- BERANDA ---
@@ -1865,84 +1969,56 @@ if(document.getElementById('schedule-list')) {
     refreshUserCoordinates(false);
 }
 
-async function loadTodaySchedule() {
-    const list = document.getElementById('schedule-list'); const today = new Date();
-    const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    const todayDayName = namaHari[today.getDay()]; let combinedSchedule = [];
-    
-    let savedMatkul = getActiveMatkulList(); let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
-    let savedTasks = JSON.parse(localStorage.getItem('nalaTasks')) || []; let savedRoutines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
+function renderScheduleCardsToDOM(list, combinedSchedule, todayStr) {
+    if (!combinedSchedule.length) {
+        list.innerHTML = '<div class="empty-state-center"><p>Semua jadwal hari ini sudah beres!</p></div>';
+        return;
+    }
 
-    let isHoliday = getHolidayInfo(todayStr);
-    let todaysMatkul = savedMatkul.filter(m => m.hari === todayDayName);
-    if(todayDayName === 'Minggu' || isHoliday) todaysMatkul = []; 
-    
-    todaysMatkul = todaysMatkul.filter(m => !overrides.some(o => o.matkulId === m.id && o.originalDate === todayStr));
-    let movedIn = overrides.filter(o => o.newDate === todayStr).map(o => { let orig = savedMatkul.find(m => m.id === o.matkulId); return orig ? { ...orig, ...o, isOverride: true } : null; }).filter(x => x);
-    [...todaysMatkul, ...movedIn].forEach(m => {
-        let eTime = m.isOverride && m.newEndTime !== undefined ? m.newEndTime : (m.jamSelesai || '');
-        combinedSchedule.push({ type: 'kuliah', id: m.id, name: `${m.name}`, badge: 'Kuliah', time: m.isOverride ? m.newTime : m.jamMulai, endTime: eTime, color: 'var(--color-kuliah)', ruang: m.isOverride ? m.newRuangan : m.ruangan, dosen: m.isOverride ? m.newDosen : m.dosen });
-    });
-
-    savedTasks.forEach(t => {
-        let isToday = (t.category === 'Acara') ? isDateInAcaraRange(todayStr, t) : (t.date === todayStr);
-        if(isToday) {
-            let tCat = t.category.toLowerCase().includes('tugas') ? 'Tugas' : 'Acara';
-            combinedSchedule.push({ type: tCat.toLowerCase(), id: t.id, name: t.name, badge: tCat, time: t.time, endTime: t.endTime || '', color: t.color || 'var(--color-acara)', desc: t.deskripsi || 'Tidak ada catatan.', via: t.pengumpulan, ruang: t.ruang || '', cat: t.category, status: t.status });
-        }
-    });
-
-    savedRoutines.filter(r => r.days.includes(todayDayName)).forEach(r => {
-        combinedSchedule.push({ type: 'rutin', id: r.id, name: r.name, badge: 'Rutinitas', time: r.time, endTime: '', color: r.color || 'var(--color-rutin)', desc: r.desc || 'Jadwal Rutinitas Mingguan' });
-    });
-
-    const salatList = await fetchSalatTimingsForDate(today, todayStr);
-    salatList.forEach((s) => {
-        combinedSchedule.push({ type: 'salat', id: s.name, name: s.name, badge: '', time: s.time, endTime: '', color: 'var(--color-salat)', desc: 'Waktu Salat' });
-    });
-
-    combinedSchedule.sort((a, b) => a.time.localeCompare(b.time));
-    list.innerHTML = combinedSchedule.length ? '' : '<p style="text-align:center; color:var(--text-muted);">Semua jadwal hari ini sudah beres!</p>';
-
+    let html = '';
     combinedSchedule.forEach(item => {
         let completed = (item.type === 'tugas' || item.type === 'acara') ? (item.status === 'done') : isDismissed(item.type, item.id, todayStr);
         let titleStyle = completed ? 'text-decoration: line-through; color: var(--state-dimmed);' : '';
-        let btnIcon = completed ? iChkCir : iCir; let cardOpacity = completed ? 'opacity: 0.65;' : '';
+        let btnIcon = completed ? iChkCir : iCir;
+        let cardOpacity = completed ? 'opacity: 0.65;' : '';
 
         let detailHtml = '';
-        if(item.type === 'kuliah') { 
-            detailHtml = `<div class="detail-grid"><div class="detail-item">${iRom} <div><span>Ruangan</span>${item.ruang}</div></div><div class="detail-item">${iUsr} <div><span>Dosen</span>${item.dosen}</div></div></div>`; 
-        } else if(item.type === 'tugas' || item.type === 'acara') { 
+        if(item.type === 'kuliah') {
+            const overrideAction = item.isOverride
+                ? `<div class="card-actions"><button class="icon-btn delete" onclick="event.stopPropagation(); deleteOverride(${Number(item.id)}, '${escapeHtml(item.originalDate)}')">${iDel} Hapus Jadwal Ini</button></div>`
+                : '';
+            detailHtml = `<div class="detail-grid"><div class="detail-item">${iRom} <div><span>Ruangan</span>${escapeHtml(item.ruang)}</div></div><div class="detail-item">${iUsr} <div><span>Dosen</span>${escapeHtml(item.dosen)}</div></div></div>${overrideAction}`;
+        } else if(item.type === 'tugas' || item.type === 'acara') {
             let extraInfo = '';
-            if(item.via) extraInfo += `<span>Via/Kumpul:</span> <strong>${item.via}</strong><br>`;
-            if(item.ruang) extraInfo += `<span>Tempat:</span> <strong>${item.ruang}</strong><br>`;
-            
-            detailHtml = `<p style="line-height:1.5;">${item.desc}</p> ${extraInfo ? `<div style="margin-top:12px; padding-top:12px; border-top:1px dashed var(--border-line);">${extraInfo}</div>` : ''} 
+            if(item.via) extraInfo += `<span>Via/Kumpul:</span> <strong>${escapeHtml(item.via)}</strong><br>`;
+            if(item.ruang) extraInfo += `<span>Tempat:</span> <strong>${escapeHtml(item.ruang)}</strong><br>`;
+
+            detailHtml = `<p style="line-height:1.5;">${escapeHtml(item.desc)}</p> ${extraInfo ? `<div style="margin-top:12px; padding-top:12px; border-top:1px dashed var(--border-line);">${extraInfo}</div>` : ''} 
             <div class="card-actions three-btns">
-                <button class="icon-btn delete" onclick="event.stopPropagation(); deleteTask(${item.id})">${iDel} Hapus</button>
-                <div><button class="icon-btn" onclick="event.stopPropagation(); openEditTask(${item.id}, '${item.cat}')">${iEdt} Edit</button></div>
-            </div>`; 
+                <button class="icon-btn delete" onclick="event.stopPropagation(); deleteTask(${Number(item.id)})">${iDel} Hapus</button>
+                <div><button class="icon-btn" onclick="event.stopPropagation(); openEditTask(${Number(item.id)}, '${escapeHtml(item.cat)}')">${iEdt} Edit</button></div>
+            </div>`;
         } else if(item.type === 'rutin') {
-            detailHtml = `<p>${item.desc}</p>
+            detailHtml = `<p>${escapeHtml(item.desc)}</p>
             <div class="card-actions three-btns">
-                <button class="icon-btn delete" onclick="event.stopPropagation(); deleteRoutine(${item.id})">${iDel} Hapus</button>
-                <div><button class="icon-btn" onclick="event.stopPropagation(); openEditRoutine(${item.id})">${iEdt} Edit</button></div>
+                <button class="icon-btn delete" onclick="event.stopPropagation(); deleteRoutine(${Number(item.id)})">${iDel} Hapus</button>
+                <div><button class="icon-btn" onclick="event.stopPropagation(); openEditRoutine(${Number(item.id)})">${iEdt} Edit</button></div>
             </div>`;
         } else {
-            detailHtml = `<p>${item.desc}</p>`;
+            detailHtml = `<p>${escapeHtml(item.desc)}</p>`;
         }
 
-        let badgeHtml = item.badge ? `<span class="tag-pill" style="${titleStyle}">${item.badge}</span>` : '';
+        let badgeHtml = item.badge ? `<span class="tag-pill" style="${titleStyle}">${escapeHtml(item.badge)}</span>` : '';
 
-        list.innerHTML += `
+        html += `
             <div class="card" onclick="toggleDetail(this)" style="${cardOpacity}">
-                <div class="card-header" style="background-color: ${item.color};">
+                <div class="card-header" style="background-color: ${escapeHtml(item.color)};">
                     <div class="card-header-top">
                         <div class="card-title-group">
-                            <button class="check-btn" onclick="event.stopPropagation(); toggleDismiss('${item.type}', '${item.id}', '${todayStr}')">${btnIcon}</button>
+                            <button class="check-btn" onclick="event.stopPropagation(); toggleDismiss('${escapeHtml(item.type)}', '${escapeHtml(String(item.id))}', '${escapeHtml(todayStr)}')">${btnIcon}</button>
                             <div>
-                                <h3 style="${titleStyle}">${item.name}</h3>
-                                <small class="time-badge" style="${titleStyle}">${iClk} ${item.time} ${item.endTime ? '- '+item.endTime : ''}</small>
+                                <h3 style="${titleStyle}">${escapeHtml(item.name)}</h3>
+                                <small class="time-badge" style="${titleStyle}">${iClk} ${escapeHtml(item.time)} ${item.endTime ? '- ' + escapeHtml(item.endTime) : ''}</small>
                             </div>
                         </div>
                         ${badgeHtml}
@@ -1951,16 +2027,128 @@ async function loadTodaySchedule() {
                 <div class="card-detail">${detailHtml}</div>
             </div>`;
     });
+
+    list.innerHTML = html;
+}
+
+async function loadTodaySchedule() {
+    const list = document.getElementById('schedule-list');
+    if (!list) return;
+    const renderToken = ++scheduleRenderToken;
+
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const todayDayName = namaHari[today.getDay()];
+    let baseSchedule = [];
+
+    let savedMatkul = getActiveMatkulList();
+    let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
+    let savedTasks = JSON.parse(localStorage.getItem('nalaTasks')) || [];
+    let savedRoutines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
+
+    let isHoliday = getHolidayInfo(todayStr);
+    let todaysMatkul = savedMatkul.filter(m => m.hari === todayDayName);
+    if(todayDayName === 'Minggu' || isHoliday) todaysMatkul = [];
+
+    todaysMatkul = todaysMatkul.filter(m => !overrides.some(o => o.matkulId === m.id && o.originalDate === todayStr));
+    let movedIn = overrides
+        .filter(o => o.newDate === todayStr)
+        .map(o => {
+            let orig = savedMatkul.find(m => m.id === o.matkulId);
+            return orig ? { ...orig, ...o, isOverride: true } : null;
+        })
+        .filter(x => x);
+
+    [...todaysMatkul, ...movedIn].forEach(m => {
+        let eTime = m.isOverride && m.newEndTime !== undefined ? m.newEndTime : (m.jamSelesai || '');
+        baseSchedule.push({
+            type: 'kuliah',
+            id: m.id,
+            name: m.name,
+            badge: 'Kuliah',
+            time: m.isOverride ? m.newTime : m.jamMulai,
+            endTime: eTime,
+            color: 'var(--color-kuliah)',
+            ruang: m.isOverride ? m.newRuangan : m.ruangan,
+            dosen: m.isOverride ? m.newDosen : m.dosen,
+            isOverride: !!m.isOverride,
+            originalDate: m.originalDate || todayStr
+        });
+    });
+
+    savedTasks.forEach(t => {
+        let isToday = (t.category === 'Acara') ? isDateInAcaraRange(todayStr, t) : (t.date === todayStr);
+        if(isToday) {
+            let tCat = t.category.toLowerCase().includes('tugas') ? 'Tugas' : 'Acara';
+            baseSchedule.push({
+                type: tCat.toLowerCase(),
+                id: t.id,
+                name: t.name,
+                badge: tCat,
+                time: t.time,
+                endTime: t.endTime || '',
+                color: t.color || 'var(--color-acara)',
+                desc: t.deskripsi || 'Tidak ada catatan.',
+                via: t.pengumpulan,
+                ruang: t.ruang || '',
+                cat: t.category,
+                status: t.status
+            });
+        }
+    });
+
+    savedRoutines.filter(r => r.days.includes(todayDayName)).forEach(r => {
+        baseSchedule.push({
+            type: 'rutin',
+            id: r.id,
+            name: r.name,
+            badge: 'Rutinitas',
+            time: r.time,
+            endTime: '',
+            color: r.color || 'var(--color-rutin)',
+            desc: r.desc || 'Jadwal Rutinitas Mingguan'
+        });
+    });
+
+    // Cek cache salat lokal secara sinkron agar tampil instan (0 ms)
+    const cachedSalat = getCachedSalatTimingsSync(today, todayStr);
+    if (cachedSalat) {
+        const fullSchedule = [
+            ...baseSchedule,
+            ...cachedSalat.map(s => ({ type: 'salat', id: s.name, name: s.name, badge: '', time: s.time, endTime: '', color: 'var(--color-salat)', desc: 'Waktu Salat' }))
+        ];
+        fullSchedule.sort((a, b) => a.time.localeCompare(b.time));
+        renderScheduleCardsToDOM(list, fullSchedule, todayStr);
+        return;
+    }
+
+    // Jika belum ada di cache (mis. awal bulan atau baru pindah kota), render jadwal lokal dulu tanpa menunggu internet
+    if (baseSchedule.length > 0) {
+        const sortedLocal = [...baseSchedule].sort((a, b) => a.time.localeCompare(b.time));
+        renderScheduleCardsToDOM(list, sortedLocal, todayStr);
+    } else {
+        list.innerHTML = '<div class="empty-state-center"><p>Memuat jadwal salat...</p></div>';
+    }
+
+    const salatList = await fetchSalatTimingsForDate(today, todayStr);
+    if (renderToken !== scheduleRenderToken) return;
+
+    const fullSchedule = [
+        ...baseSchedule,
+        ...salatList.map(s => ({ type: 'salat', id: s.name, name: s.name, badge: '', time: s.time, endTime: '', color: 'var(--color-salat)', desc: 'Waktu Salat' }))
+    ];
+    fullSchedule.sort((a, b) => a.time.localeCompare(b.time));
+    renderScheduleCardsToDOM(list, fullSchedule, todayStr);
 }
 
 // --- KALENDER ---
 function getOverdueTasks() {
-    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const now = new Date();
     return (JSON.parse(localStorage.getItem('nalaTasks')) || []).filter(t => {
         if (t.status === 'done') return false;
         if (t.category !== 'Tugas Kuliah' && t.category !== 'Tugas') return false;
-        const taskDate = new Date(t.date); taskDate.setHours(0, 0, 0, 0);
-        return taskDate < today;
+        const taskDateTime = parseLocalDateTime(t.date, t.time);
+        return taskDateTime < now;
     });
 }
 
@@ -2003,13 +2191,13 @@ if(document.getElementById('calendar-grid')) {
     renderMonthCalendar(); renderHistory('Tugas Kuliah'); renderUpcomingTasks();
     if(document.getElementById('native-month-picker')) {
         document.getElementById('native-month-picker').addEventListener('change', function(e) {
-            if(e.target.value) { const p = e.target.value.split('-'); currentNavDate.setFullYear(parseInt(p[0]), parseInt(p[1]) - 1); renderMonthCalendar(); }
+            if(e.target.value) { const p = e.target.value.split('-'); currentNavDate.setFullYear(parseInt(p[0], 10), parseInt(p[1], 10) - 1); renderMonthCalendar(); }
         });
     }
 }
 
 function renderMonthCalendar() {
-    const grid = document.getElementById('calendar-grid'); if(!grid) return; grid.innerHTML = '';
+    const grid = document.getElementById('calendar-grid'); if(!grid) return;
     const year = currentNavDate.getFullYear(); const month = currentNavDate.getMonth();
     ensureAutoHolidaysForYear(year);
     
@@ -2046,13 +2234,14 @@ function renderMonthCalendar() {
     }
     if(nativePickerEl) nativePickerEl.value = `${year}-${String(month+1).padStart(2, '0')}`;
     
-    ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].forEach(d => { grid.innerHTML += `<div class="day-name">${d}</div>`; });
+    let gridHtml = '';
+    ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].forEach(d => { gridHtml += `<div class="day-name">${d}</div>`; });
     const firstDay = new Date(year, month, 1).getDay(); const daysInMonth = new Date(year, month + 1, 0).getDate();
     const prevDays = new Date(year, month, 0).getDate();
     
     let savedTasks = JSON.parse(localStorage.getItem('nalaTasks')) || []; let savedMatkul = getActiveMatkulList(); let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
     
-    for(let i = firstDay - 1; i >= 0; i--) { grid.innerHTML += `<div class="day-cell dimmed" onclick="changeMonth(-1)"><span class="day-number">${prevDays - i}</span></div>`; }
+    for(let i = firstDay - 1; i >= 0; i--) { gridHtml += `<div class="day-cell dimmed" onclick="changeMonth(-1)"><span class="day-number">${prevDays - i}</span></div>`; }
     for(let i = 1; i <= daysInMonth; i++) {
         let currentLoopDate = `${year}-${String(month+1).padStart(2, '0')}-${String(i).padStart(2, '0')}`; let loopDayName = namaHari[new Date(year, month, i).getDay()];
         
@@ -2073,65 +2262,71 @@ function renderMonthCalendar() {
         });
         
         let uColors = [...new Set(dayColors)]; let pillStyle = '';
-        if (uColors.length === 1) pillStyle = `background: ${uColors[0]};`;
+        if (uColors.length === 1) pillStyle = `background: ${escapeHtml(uColors[0])};`;
         else if (uColors.length > 1) {
             let gradient = 'linear-gradient(to right, '; let step = 100 / uColors.length;
-            uColors.forEach((c, idx) => { gradient += `${c} ${idx * step}%, ${c} ${(idx + 1) * step}%${idx < uColors.length - 1 ? ', ' : ''}`; });
+            uColors.forEach((c, idx) => { gradient += `${escapeHtml(c)} ${idx * step}%, ${escapeHtml(c)} ${(idx + 1) * step}%${idx < uColors.length - 1 ? ', ' : ''}`; });
             pillStyle = `background: ${gradient});`;
         }
         let pillHtml = uColors.length > 0 ? `<div class="event-pill-container"><div class="event-pill" style="${pillStyle}"></div></div>` : '';
         let numClass = isOffDay ? 'day-number sunday-red' : 'day-number';
-        
         let todayClass = (currentLoopDate === realTodayStr) ? ' today-highlight' : '';
         
-        grid.innerHTML += `<div class="day-cell${todayClass}" onclick="showDayDetails('${currentLoopDate}', '${loopDayName}')"><span class="${numClass}">${i}</span>${pillHtml}</div>`;
+        gridHtml += `<div class="day-cell${todayClass}" onclick="showDayDetails('${currentLoopDate}', '${loopDayName}')"><span class="${numClass}">${i}</span>${pillHtml}</div>`;
     }
     const totalCells = firstDay + daysInMonth; const nextDays = (totalCells % 7 === 0) ? 0 : 7 - (totalCells % 7);
-    for(let i = 1; i <= nextDays; i++) { grid.innerHTML += `<div class="day-cell dimmed" onclick="changeMonth(1)"><span class="day-number">${i}</span></div>`; }
+    for(let i = 1; i <= nextDays; i++) { gridHtml += `<div class="day-cell dimmed" onclick="changeMonth(1)"><span class="day-number">${i}</span></div>`; }
+    grid.innerHTML = gridHtml;
 }
 
 function renderUpcomingTasks() {
-    const list = document.getElementById('upcoming-list'); if(!list) return; list.innerHTML = '';
-    const today = new Date(); today.setHours(0,0,0,0);
+    const list = document.getElementById('upcoming-list'); if(!list) return;
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     let pendingTasks = (JSON.parse(localStorage.getItem('nalaTasks')) || []).filter(t => {
         if (t.status === 'done' || (t.category !== 'Tugas Kuliah' && t.category !== 'Tugas')) return false;
-        let taskDate = new Date(t.date); taskDate.setHours(0,0,0,0);
-        return taskDate >= today;
+        let taskDateTime = parseLocalDateTime(t.date, t.time);
+        return taskDateTime >= now;
     });
 
     if(pendingTasks.length === 0) { list.innerHTML = '<p style="color:var(--text-muted); font-size:14px;">Semua tugas aktif sudah beres.</p>'; return; }
 
-    pendingTasks.sort((a,b) => new Date(a.date) - new Date(b.date)).forEach(t => {
-        let taskDate = new Date(t.date); taskDate.setHours(0,0,0,0);
-        let diffDays = Math.ceil((taskDate - today) / (1000 * 60 * 60 * 24));
-        let badgeClass = 'countdown-badge'; let badgeText = diffDays === 0 ? 'Hari Ini!' : diffDays === 1 ? 'Besok!' : `H-${diffDays}`;
-        if(diffDays <= 1) badgeClass += ' countdown-alert';
+    let html = '';
+    pendingTasks
+        .sort((a, b) => parseLocalDateTime(a.date, a.time) - parseLocalDateTime(b.date, b.time))
+        .forEach(t => {
+            let taskDayStart = parseLocalDate(t.date);
+            let diffDays = Math.round((taskDayStart - todayStart) / (1000 * 60 * 60 * 24));
+            let badgeClass = 'countdown-badge';
+            let badgeText = diffDays === 0 ? 'Hari Ini!' : diffDays === 1 ? 'Besok!' : `H-${diffDays}`;
+            if(diffDays <= 1) badgeClass += ' countdown-alert';
 
-        list.innerHTML += `
-            <div class="card" onclick="toggleDetail(this)">
-                <div class="card-header" style="background-color: ${t.color || 'var(--color-tugas)'};">
-                    <div class="card-header-top">
-                        <div class="card-title-group">
-                            <button class="check-btn" onclick="event.stopPropagation(); toggleTaskDone('${t.id}')">${iCir}</button>
-                            <div>
-                                <h3>${t.name}</h3>
-                                <small>${iDat} ${formatShortDate(t.date)}   ${iClk} ${t.time}</small>
+            html += `
+                <div class="card" onclick="toggleDetail(this)">
+                    <div class="card-header" style="background-color: ${escapeHtml(t.color || 'var(--color-tugas)')};">
+                        <div class="card-header-top">
+                            <div class="card-title-group">
+                                <button class="check-btn" onclick="event.stopPropagation(); toggleTaskDone('${escapeHtml(String(t.id))}')">${iCir}</button>
+                                <div>
+                                    <h3>${escapeHtml(t.name)}</h3>
+                                    <small>${iDat} ${formatShortDate(t.date)}   ${iClk} ${escapeHtml(t.time)}</small>
+                                </div>
                             </div>
+                            <span class="${badgeClass}">${badgeText}</span>
                         </div>
-                        <span class="${badgeClass}">${badgeText}</span>
                     </div>
-                </div>
-                <div class="card-detail">
-                    <p style="margin-bottom:12px; line-height:1.5;">${t.deskripsi || 'Tidak ada deskripsi.'}</p>
-                    ${t.pengumpulan ? `<div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px dashed var(--border-line); font-size:13px;"><strong>Via:</strong> ${t.pengumpulan}</div>` : ''}
-                    <div class="card-actions three-btns">
-                        <button class="icon-btn delete" onclick="event.stopPropagation(); deleteTask(${t.id})">${iDel} Hapus</button>
-                        <div><button class="icon-btn" onclick="event.stopPropagation(); openEditTask(${t.id}, '${t.category}')">${iEdt} Edit</button></div>
+                    <div class="card-detail">
+                        <p style="margin-bottom:12px; line-height:1.5;">${escapeHtml(t.deskripsi || 'Tidak ada deskripsi.')}</p>
+                        ${t.pengumpulan ? `<div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px dashed var(--border-line); font-size:13px;"><strong>Via:</strong> ${escapeHtml(t.pengumpulan)}</div>` : ''}
+                        <div class="card-actions three-btns">
+                            <button class="icon-btn delete" onclick="event.stopPropagation(); deleteTask(${Number(t.id)})">${iDel} Hapus</button>
+                            <div><button class="icon-btn" onclick="event.stopPropagation(); openEditTask(${Number(t.id)}, '${escapeHtml(t.category)}')">${iEdt} Edit</button></div>
+                        </div>
                     </div>
-                </div>
-            </div>`;
-    });
+                </div>`;
+        });
+    list.innerHTML = html;
 }
 
 function renderHistory(tabName) {
@@ -2141,68 +2336,72 @@ function renderHistory(tabName) {
     if(document.getElementById('tab-terlewat')) document.getElementById('tab-terlewat').classList.toggle('active', tabName === 'Terlewat');
     updateOverdueTabLabel();
     
-    let list = document.getElementById('history-list'); if(!list) return; list.innerHTML = '';
+    let list = document.getElementById('history-list'); if(!list) return;
 
     if (tabName === 'Terlewat') {
-        const overdueTasks = getOverdueTasks().sort((a, b) => a.date.localeCompare(b.date));
+        const overdueTasks = getOverdueTasks().sort((a, b) => parseLocalDateTime(a.date, a.time) - parseLocalDateTime(b.date, b.time));
         if (overdueTasks.length === 0) {
             list.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center;">Tidak ada tugas yang terlewat.</p>';
             return;
         }
+        let html = '';
         overdueTasks.forEach(t => {
-            list.innerHTML += `
+            html += `
                 <div class="card" onclick="toggleDetail(this)">
-                    <div class="card-header" style="background-color: ${t.color || 'var(--color-tugas)'};">
+                    <div class="card-header" style="background-color: ${escapeHtml(t.color || 'var(--color-tugas)')};">
                         <div class="card-header-top">
                             <div class="card-title-group">
-                                <button class="check-btn" onclick="event.stopPropagation(); toggleTaskDone('${t.id}')">${iCir}</button>
+                                <button class="check-btn" onclick="event.stopPropagation(); toggleTaskDone('${escapeHtml(String(t.id))}')">${iCir}</button>
                                 <div>
-                                    <h3>${t.name}</h3>
-                                    <small>${iDat} ${formatShortDate(t.date)}   ${iClk} ${t.time}</small>
+                                    <h3>${escapeHtml(t.name)}</h3>
+                                    <small>${iDat} ${formatShortDate(t.date)}   ${iClk} ${escapeHtml(t.time)}</small>
                                 </div>
                             </div>
                             <span class="countdown-badge countdown-alert">Terlewat!</span>
                         </div>
                     </div>
                     <div class="card-detail">
-                        <p style="margin-bottom:12px; line-height:1.5;">${t.deskripsi || t.category}</p>
-                        ${t.pengumpulan ? `<div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px dashed var(--border-line); font-size:13px;"><strong>Via:</strong> ${t.pengumpulan}</div>` : ''}
+                        <p style="margin-bottom:12px; line-height:1.5;">${escapeHtml(t.deskripsi || t.category)}</p>
+                        ${t.pengumpulan ? `<div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px dashed var(--border-line); font-size:13px;"><strong>Via:</strong> ${escapeHtml(t.pengumpulan)}</div>` : ''}
                         <div class="card-actions three-btns">
-                            <button class="icon-btn delete" onclick="event.stopPropagation(); deleteTask(${t.id})">${iDel} Hapus</button>
-                            <div><button class="icon-btn" onclick="event.stopPropagation(); openEditTask(${t.id}, '${t.category}')">${iEdt} Edit</button></div>
+                            <button class="icon-btn delete" onclick="event.stopPropagation(); deleteTask(${Number(t.id)})">${iDel} Hapus</button>
+                            <div><button class="icon-btn" onclick="event.stopPropagation(); openEditTask(${Number(t.id)}, '${escapeHtml(t.category)}')">${iEdt} Edit</button></div>
                         </div>
                     </div>
                 </div>`;
         });
+        list.innerHTML = html;
         return;
     }
 
     let doneTasks = (JSON.parse(localStorage.getItem('nalaTasks')) || []).filter(t => t.status === 'done' && t.category === tabName); 
     if(doneTasks.length === 0) { list.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center;">Belum ada riwayat selesai.</p>'; return; }
     
+    let html = '';
     doneTasks.sort((a,b) => b.date.localeCompare(a.date)).forEach(t => { 
-        list.innerHTML += `
+        html += `
             <div class="card history-card" onclick="toggleDetail(this)">
-                <div class="card-header" style="background-color: ${t.color || 'var(--color-tugas)'}; opacity:0.8;">
+                <div class="card-header" style="background-color: ${escapeHtml(t.color || 'var(--color-tugas)')}; opacity:0.8;">
                     <div class="card-header-top">
                         <div class="card-title-group">
-                            <button class="check-btn" onclick="event.stopPropagation(); toggleTaskDone('${t.id}')">${iChkCir}</button>
+                            <button class="check-btn" onclick="event.stopPropagation(); toggleTaskDone('${escapeHtml(String(t.id))}')">${iChkCir}</button>
                             <div>
-                                <h3 class="dimmed-text">${t.name}</h3>
+                                <h3 class="dimmed-text">${escapeHtml(t.name)}</h3>
                                 <small class="dimmed-text">${iDat} ${formatShortDate(t.date)}</small>
                             </div>
                         </div>
                     </div>
                 </div>
                 <div class="card-detail">
-                    <p style="color:var(--text-muted); line-height:1.5;">${t.deskripsi || t.category} ${t.pengumpulan ? `<br>Via: ${t.pengumpulan}` : ''}</p>
+                    <p style="color:var(--text-muted); line-height:1.5;">${escapeHtml(t.deskripsi || t.category)} ${t.pengumpulan ? `<br>Via: ${escapeHtml(t.pengumpulan)}` : ''}</p>
                     <div class="card-actions three-btns">
-                        <button class="icon-btn delete" onclick="event.stopPropagation(); deleteTask(${t.id})">${iDel} Hapus</button>
-                        <div><button class="icon-btn" onclick="event.stopPropagation(); openEditTask(${t.id}, '${t.category}')">${iEdt} Edit</button></div>
+                        <button class="icon-btn delete" onclick="event.stopPropagation(); deleteTask(${Number(t.id)})">${iDel} Hapus</button>
+                        <div><button class="icon-btn" onclick="event.stopPropagation(); openEditTask(${Number(t.id)}, '${escapeHtml(t.category)}')">${iEdt} Edit</button></div>
                     </div>
                 </div>
             </div>`; 
     });
+    list.innerHTML = html;
 }
 
 function changeMonth(offset) { currentNavDate.setMonth(currentNavDate.getMonth() + offset); renderMonthCalendar(); }
@@ -2228,7 +2427,7 @@ function showDayDetails(dateStr, dayName) {
         let ruang = m.isOverride ? m.newRuangan : m.ruangan; 
         let dosen = m.isOverride ? m.newDosen : m.dosen; 
         let origDate = m.isOverride ? m.originalDate : dateStr;
-        popUpItems.push({ type: 'kuliah', id: m.id, name: m.name, badge: 'Kuliah', time: time, endTime: end, color: 'var(--color-kuliah)', ruang: ruang, dosen: dosen, origDate: origDate });
+        popUpItems.push({ type: 'kuliah', id: m.id, name: m.name, badge: 'Kuliah', time: time, endTime: end, color: 'var(--color-kuliah)', ruang: ruang, dosen: dosen, origDate: origDate, isOverride: !!m.isOverride });
     });
 
     savedTasks.forEach(t => {
@@ -2245,28 +2444,34 @@ function showDayDetails(dateStr, dayName) {
     popUpItems.forEach(item => {
         let detailHtml = '';
         if (item.type === 'kuliah') {
+            const actionButtons = item.isOverride
+                ? `<div class="card-actions three-btns">
+                       <button class="icon-btn delete" onclick="event.stopPropagation(); deleteOverride(${Number(item.id)}, '${escapeHtml(item.origDate)}')">${iDel} Hapus</button>
+                       <div><button class="icon-btn" onclick="event.stopPropagation(); openRescheduleModal(${Number(item.id)}, '${escapeHtml(item.origDate)}', '${escapeHtml(dateStr)}')">${iEdt} Pindah Jadwal</button></div>
+                   </div>`
+                : `<div class="card-actions"><button class="icon-btn" onclick="event.stopPropagation(); openRescheduleModal(${Number(item.id)}, '${escapeHtml(item.origDate)}', '${escapeHtml(dateStr)}')">${iEdt} Pindah Jadwal</button></div>`;
             detailHtml = `
-                <div class="detail-grid"><div class="detail-item">${iRom} <div><span>Ruangan</span>${item.ruang}</div></div><div class="detail-item">${iUsr} <div><span>Dosen</span>${item.dosen}</div></div></div>
-                <div class="card-actions"><button class="icon-btn" onclick="event.stopPropagation(); openRescheduleModal(${item.id}, '${item.origDate}', '${dateStr}')">${iEdt} Pindah Jadwal</button></div>`;
+                <div class="detail-grid"><div class="detail-item">${iRom} <div><span>Ruangan</span>${escapeHtml(item.ruang)}</div></div><div class="detail-item">${iUsr} <div><span>Dosen</span>${escapeHtml(item.dosen)}</div></div></div>
+                ${actionButtons}`;
         } else if (item.type === 'tugasAcara') {
             let extraInfo = '';
-            if(item.via) extraInfo += `<span>Via/Kumpul:</span> <strong>${item.via}</strong><br>`;
-            if(item.ruang) extraInfo += `<span>Tempat:</span> <strong>${item.ruang}</strong><br>`;
+            if(item.via) extraInfo += `<span>Via/Kumpul:</span> <strong>${escapeHtml(item.via)}</strong><br>`;
+            if(item.ruang) extraInfo += `<span>Tempat:</span> <strong>${escapeHtml(item.ruang)}</strong><br>`;
             
-            detailHtml = `<p style="line-height:1.5;">${item.desc || 'Tidak ada deskripsi'}</p>${extraInfo ? `<div style="margin-top:12px; padding-top:12px; border-top:1px dashed var(--border-line);">${extraInfo}</div>` : ''}`;
+            detailHtml = `<p style="line-height:1.5;">${escapeHtml(item.desc || 'Tidak ada deskripsi')}</p>${extraInfo ? `<div style="margin-top:12px; padding-top:12px; border-top:1px dashed var(--border-line);">${extraInfo}</div>` : ''}`;
         }
 
         listHtml += `
             <div class="card" onclick="toggleDetail(this)" style="margin-bottom:10px;">
-                <div class="card-header" style="background-color: ${item.color}; padding:12px 16px;">
+                <div class="card-header" style="background-color: ${escapeHtml(item.color)}; padding:12px 16px;">
                     <div class="card-header-top">
                         <div class="card-title-group">
                             <div>
-                                <h3 style="font-size:14px;">${item.name}</h3>
-                                <small class="time-badge">${item.time} ${item.endTime ? '- '+item.endTime : ''}</small>
+                                <h3 style="font-size:14px;">${escapeHtml(item.name)}</h3>
+                                <small class="time-badge">${escapeHtml(item.time)} ${item.endTime ? '- ' + escapeHtml(item.endTime) : ''}</small>
                             </div>
                         </div>
-                        <span class="tag-pill">${item.badge}</span>
+                        <span class="tag-pill">${escapeHtml(item.badge)}</span>
                     </div>
                 </div>
                 <div class="card-detail" style="padding:12px 16px;">${detailHtml}</div>
@@ -2294,11 +2499,13 @@ function openRescheduleModal(matkulId, origDate, activeDate) {
 }
 
 function saveReschedule() {
-    const mId = parseInt(document.getElementById('res-matkulId').value); const origDate = document.getElementById('res-originalDate').value;
+    const mId = parseInt(document.getElementById('res-matkulId').value, 10); const origDate = document.getElementById('res-originalDate').value;
     const timeEndInput = document.getElementById('res-time-end'); const newEndTime = timeEndInput ? timeEndInput.value : '';
     let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || []; overrides = overrides.filter(o => !(o.matkulId === mId && o.originalDate === origDate));
     overrides.push({ matkulId: mId, originalDate: origDate, newDate: document.getElementById('res-date').value, newTime: document.getElementById('res-time').value, newEndTime: newEndTime, newRuangan: document.getElementById('res-ruang').value, newDosen: document.getElementById('res-dosen').value });
-    localStorage.setItem('nalaOverrides', JSON.stringify(overrides)); closeModal('reschedule-modal'); renderMonthCalendar();
+    localStorage.setItem('nalaOverrides', JSON.stringify(overrides));
+    closeModal('reschedule-modal');
+    refreshAllViews();
 }
 
 function openModal(category) {
@@ -2340,12 +2547,17 @@ function openModal(category) {
     if(document.getElementById('new-task-color')) updateSwatchSelection(category === 'Rutinitas' ? '#8C6239' : '#3E5A47');
     
     if(category === 'Tugas Kuliah' || category === 'Kuliah') {
-        const sel = document.getElementById('task-matkul-select'); sel.innerHTML = '<option value="">-- Pilih Kuliah --</option>';
+        const sel = document.getElementById('task-matkul-select');
+        let optHtml = '<option value="">-- Pilih Kuliah --</option>';
         let savedMatkul = getActiveMatkulList(); 
         let uniqueMatkul = [];
         savedMatkul.forEach(m => {
-            if(!uniqueMatkul.includes(m.name)) { uniqueMatkul.push(m.name); sel.innerHTML += `<option value="${m.name}">${m.name}</option>`; }
+            if(!uniqueMatkul.includes(m.name)) {
+                uniqueMatkul.push(m.name);
+                optHtml += `<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)}</option>`;
+            }
         });
+        sel.innerHTML = optHtml;
     }
     hideFabForModal();
     document.getElementById('insert-modal').style.display = 'flex';
@@ -2525,8 +2737,12 @@ function renderMatkulList() {
     const subEl = document.getElementById('active-semester-subtitle');
     if (subEl && activeSem) subEl.innerText = activeSem.name;
 
-    list.innerHTML = ''; let savedMatkul = getActiveMatkulList();
-    if(savedMatkul.length === 0) { list.innerHTML = `<p style="text-align:center; color:var(--text-muted);">Belum ada jadwal kuliah di ${activeSem ? activeSem.name : 'semester ini'}.</p>`; return; }
+    let savedMatkul = getActiveMatkulList();
+    if(savedMatkul.length === 0) {
+        const semName = activeSem ? escapeHtml(activeSem.name) : 'semester ini';
+        list.innerHTML = `<div class="empty-state-center"><p>Belum ada jadwal kuliah di ${semName}.</p></div>`;
+        return;
+    }
     
     const namaHariUrut = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
     savedMatkul.sort((a, b) => {
@@ -2538,32 +2754,34 @@ function renderMatkulList() {
         return a.jamMulai.localeCompare(b.jamMulai);
     });
     
+    let html = '';
     savedMatkul.forEach(m => { 
-        list.innerHTML += `
+        html += `
             <div class="card" onclick="toggleDetail(this)">
                 <div class="card-header" style="background-color: var(--color-kuliah);">
                     <div class="card-header-top">
                         <div class="card-title-group">
                             <div>
-                                <h3 style="font-size:15px;">${m.name}</h3>
-                                <small class="time-badge">${m.hari}</small>
+                                <h3 style="font-size:15px;">${escapeHtml(m.name)}</h3>
+                                <small class="time-badge">${escapeHtml(m.hari)}</small>
                             </div>
                         </div>
                     </div>
                 </div>
                 <div class="card-detail">
                     <div class="detail-grid">
-                        <div class="detail-item">${iClk} <div><span>Waktu</span>${m.jamMulai} - ${m.jamSelesai}</div></div>
-                        <div class="detail-item">${iRom} <div><span>Ruangan</span>${m.ruangan}</div></div>
-                        <div class="detail-item" style="grid-column: span 2;">${iUsr} <div><span>Dosen Pengampu</span>${m.dosen}</div></div>
+                        <div class="detail-item">${iClk} <div><span>Waktu</span>${escapeHtml(m.jamMulai)} - ${escapeHtml(m.jamSelesai)}</div></div>
+                        <div class="detail-item">${iRom} <div><span>Ruangan</span>${escapeHtml(m.ruangan)}</div></div>
+                        <div class="detail-item" style="grid-column: span 2;">${iUsr} <div><span>Dosen Pengampu</span>${escapeHtml(m.dosen)}</div></div>
                     </div>
                     <div class="card-actions three-btns">
-                        <button class="icon-btn delete" onclick="event.stopPropagation(); deleteMatkul(${m.id})">${iDel} Hapus</button>
-                        <div><button class="icon-btn" onclick="event.stopPropagation(); editMatkul(${m.id})">${iEdt} Edit</button></div>
+                        <button class="icon-btn delete" onclick="event.stopPropagation(); deleteMatkul(${Number(m.id)})">${iDel} Hapus</button>
+                        <div><button class="icon-btn" onclick="event.stopPropagation(); editMatkul(${Number(m.id)})">${iEdt} Edit</button></div>
                     </div>
                 </div>
             </div>`; 
     });
+    list.innerHTML = html;
 }
 
 function editMatkul(id) {
@@ -2589,6 +2807,12 @@ async function deleteMatkul(id) {
     if(!ok) return;
     let savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || []; savedMatkul = savedMatkul.filter(m => m.id != id);
     localStorage.setItem('nalaMatkul', JSON.stringify(savedMatkul));
+
+    // Bersihkan jadwal pengganti/pindahan milik mata kuliah ini
+    let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
+    overrides = overrides.filter(o => String(o.matkulId) !== String(id));
+    localStorage.setItem('nalaOverrides', JSON.stringify(overrides));
+
     refreshAllViews();
 }
 
@@ -2608,7 +2832,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }); 
     });
 
-    // --- FITUR TUTUP MODAL DENGAN KLIK DI LUAR ---
+    // --- FITUR TUTUP MODAL INFORMASI DENGAN KLIK DI LUAR (FORM TETAP AMAN) ---
     window.addEventListener('click', function(e) {
         const dismissibleModals = ['day-detail-modal', 'backup-modal']; 
         

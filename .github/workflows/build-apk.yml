@@ -111,6 +111,13 @@ jobs:
             })();
           '
           npx capacitor-assets generate --android
+          
+      - name: Pasang Suara Notifikasi Custom
+        run: |
+          mkdir -p android/app/src/main/res/raw
+          if [ -d "assets/sounds" ]; then
+            find assets/sounds -type f \( -iname "*.mp3" -o -iname "*.wav" -o -iname "*.ogg" \) -exec cp {} android/app/src/main/res/raw/ \;
+          fi
 
       - name: Tambahkan Izin Alarm & Notifikasi Android
         run: |

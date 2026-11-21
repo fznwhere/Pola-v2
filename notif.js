@@ -1,6 +1,7 @@
 // notif.js - Penjadwal Alarm Native Android untuk Pola. v2
 
-const POLA_CHANNEL_ID = 'pola_jadwal_v1';
+const POLA_CHANNEL_ID = 'pola_jadwal_v2';
+const POLA_SOUND_NAME = 'pola_notif'; // Nama file di assets/sounds/ tanpa ekstensi .mp3
 
 function stringToInt32(str) {
   let hash = 0;
@@ -21,10 +22,14 @@ function getLocalNotificationsPlugin() {
 
 async function ensurePolaNotificationChannel(LocalNotifications) {
   try {
+    // Hapus channel versi lama agar tidak menumpuk di pengaturan aplikasi HP
+    await LocalNotifications.deleteChannel({ id: 'pola_jadwal_v1' }).catch(() => {});
+
     await LocalNotifications.createChannel({
       id: POLA_CHANNEL_ID,
       name: 'Pengingat Jadwal Pola',
       description: 'Notifikasi jadwal salat, kuliah, rutinitas, dan tugas',
+      sound: POLA_SOUND_NAME,
       importance: 5,
       visibility: 1,
       vibration: true
@@ -199,6 +204,7 @@ async function syncAndroidAlarms() {
           title: `⏳ 5 Menit Lagi: ${item.name}`,
           body: `Mulai pukul ${item.time}${detail} • ${item.category}`,
           channelId: POLA_CHANNEL_ID,
+          sound: POLA_SOUND_NAME,
           smallIcon: 'ic_stat_pola',
           iconColor: '#C85A32',
           schedule: { at: pre5Date, allowWhileIdle: true }
@@ -212,6 +218,7 @@ async function syncAndroidAlarms() {
           title: `🔔 Sekarang: ${item.name}`,
           body: `Jadwal pukul ${item.time}${detail}`,
           channelId: POLA_CHANNEL_ID,
+          sound: POLA_SOUND_NAME,
           smallIcon: 'ic_stat_pola',
           iconColor: '#C85A32',
           schedule: { at: exactDate, allowWhileIdle: true }

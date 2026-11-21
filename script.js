@@ -68,6 +68,8 @@ function cleanupOldCache() {
     const curMonth = now.getMonth() + 1;
     const minYm = curYear * 12 + curMonth - 1;
 
+    localStorage.removeItem('nalaSalatSound');
+
     Object.keys(localStorage).forEach((key) => {
         if (key.startsWith('nalaSalat_')) {
             localStorage.removeItem(key);
@@ -1024,9 +1026,24 @@ function finalizeDrawerBlur(isOpen) {
 }
 
 // --- HALAMAN GESER KIRI FULL-SCREEN (BERANDA) ---
+function ensureSideDrawerStickyFooter() {
+    const drawer = document.getElementById('side-drawer');
+    if (!drawer || document.getElementById('drawer-sticky-footer')) return;
+
+    const footer = document.createElement('div');
+    footer.id = 'drawer-sticky-footer';
+    footer.className = 'drawer-sticky-footer';
+    footer.innerHTML = `
+        <span class="drawer-menu-heading">Cadangan Data</span>
+        <button type="button" class="drawer-option-btn primary-action" onclick="openBackupModal()">${iBkp} Ekspor / Impor JSON</button>
+    `;
+    drawer.appendChild(footer);
+}
+
 function openSideDrawer() {
     const drawer = document.getElementById('side-drawer');
     if (!drawer) return;
+    ensureSideDrawerStickyFooter();
     drawer.style.transition = '';
     drawer.style.transform = '';
     drawer.classList.add('open');
@@ -1075,20 +1092,12 @@ function updateDrawerOptionCounts() {
     if (document.getElementById('dcount-libur')) document.getElementById('dcount-libur').innerText = libur.length;
 }
 
-function buildDrawerBackupFooterHtml() {
-    return `
-        <div class="drawer-bottom-menu">
-            <span class="drawer-menu-heading">Cadangan Data</span>
-            <button type="button" class="drawer-option-btn primary-action" onclick="openBackupModal()">${iBkp} Ekspor / Impor JSON</button>
-        </div>
-    `;
-}
-
 function renderSideDrawerContent() {
     const container = document.getElementById('drawer-content-list');
     const labelEl = document.getElementById('drawer-section-label');
     if (!container) return;
 
+    ensureSideDrawerStickyFooter();
     updateDrawerOptionCounts();
 
     const today = new Date();
@@ -1098,7 +1107,7 @@ function renderSideDrawerContent() {
         if (labelEl) labelEl.innerText = 'Rutinitas';
         const routines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
         if (routines.length === 0) {
-            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada rutinitas.</p>' + buildDrawerBackupFooterHtml();
+            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada rutinitas.</p>';
             return;
         }
         let html = '<div class="drawer-sub-heading">Jadwal Rutin Aktif</div>';
@@ -1124,7 +1133,7 @@ function renderSideDrawerContent() {
                     </div>
                 </div>`;
         });
-        container.innerHTML = html + buildDrawerBackupFooterHtml();
+        container.innerHTML = html;
     } else if (currentDrawerTab === 'Acara') {
         if (labelEl) labelEl.innerText = 'Acara';
         const tasks = JSON.parse(localStorage.getItem('nalaTasks')) || [];
@@ -1145,7 +1154,7 @@ function renderSideDrawerContent() {
         pastAcaras.sort((a, b) => b.date.localeCompare(a.date));
 
         if (acaras.length === 0) {
-            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada acara.</p>' + buildDrawerBackupFooterHtml();
+            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada acara.</p>';
             return;
         }
 
@@ -1191,13 +1200,13 @@ function renderSideDrawerContent() {
             pastAcaras.forEach((t) => { html += buildAcaraCard(t, true); });
         }
 
-        container.innerHTML = html + buildDrawerBackupFooterHtml();
+        container.innerHTML = html;
     } else if (currentDrawerTab === 'Libur') {
         if (labelEl) labelEl.innerText = 'Hari Libur';
         const libur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
 
         if (libur.length === 0) {
-            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada jadwal hari libur pribadi.</p>' + buildDrawerBackupFooterHtml();
+            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada jadwal hari libur pribadi.</p>';
             return;
         }
 
@@ -1256,7 +1265,7 @@ function renderSideDrawerContent() {
             pastLibur.forEach((l) => { html += buildLiburCard(l, true); });
         }
 
-        container.innerHTML = html + buildDrawerBackupFooterHtml();
+        container.innerHTML = html;
     }
 }
 
@@ -1264,6 +1273,7 @@ function initSideDrawerGestures() {
     const drawer = document.getElementById('side-drawer');
     if (!drawer) return;
 
+    ensureSideDrawerStickyFooter();
     const backdrop = getOrCreateDrawerBlurBackdrop();
     let startX = 0;
     let startY = 0;
@@ -2584,6 +2594,7 @@ async function deleteMatkul(id) {
 
 document.addEventListener("DOMContentLoaded", () => { 
     ensurePolaDialogExists();
+    ensureSideDrawerStickyFooter();
     document.querySelectorAll('.fab').forEach(f => f.innerHTML = iPls);
     getOrCreateFabBackdrop();
     initRoutineSelectAll();

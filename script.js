@@ -3,6 +3,7 @@ let editId = null;
 const namaHari = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 let currentHistoryTab = 'Tugas Kuliah';
 let currentDrawerTab = 'Rutinitas';
+let currentMainPage = 'beranda';
 let editSemesterId = null;
 let pendingBackupPayload = null;
 let scheduleRenderToken = 0;
@@ -130,6 +131,65 @@ async function fetchWithTimeout(url, timeoutMs = 4000) {
         return await fetch(url, { signal: controller.signal });
     } finally {
         clearTimeout(timer);
+    }
+}
+
+// --- NAVIGASI ANTAR-HALAMAN SPA (INSTAN TANPA RELOAD) ---
+function updateFabForCurrentPage() {
+    const menu = document.getElementById('fab-menu');
+    if (!menu) return;
+    if (currentMainPage === 'beranda') {
+        menu.innerHTML = `
+            <button onclick="openModal('Rutinitas')">Rutinitas</button>
+            <button onclick="openModal('Acara')">Acara</button>
+        `;
+    } else if (currentMainPage === 'kalender') {
+        menu.innerHTML = `
+            <button onclick="openModal('Tugas')">Tugas</button>
+            <button onclick="openModal('Libur')">Libur</button>
+            <button onclick="openModal('Kuliah')">Kuliah</button>
+            <button onclick="openModal('Tugas Kuliah')">Tugas Kuliah</button>
+        `;
+    } else {
+        menu.innerHTML = '';
+    }
+}
+
+function handleMainFabClick() {
+    if (currentMainPage === 'matkul') {
+        openMatkulModal();
+    } else {
+        toggleFabMenu();
+    }
+}
+
+function switchMainPage(pageName) {
+    if (!['beranda', 'kalender', 'matkul'].includes(pageName)) pageName = 'beranda';
+    currentMainPage = pageName;
+
+    closeFabMenu();
+    closeSideDrawer();
+    closeRightSemesterDrawer();
+
+    ['beranda', 'kalender', 'matkul'].forEach((p) => {
+        const section = document.getElementById(`page-${p}`);
+        if (section) section.style.display = (p === pageName) ? 'block' : 'none';
+        const navBtn = document.getElementById(`nav-${p}`);
+        if (navBtn) navBtn.classList.toggle('active', p === pageName);
+    });
+
+    updateFabForCurrentPage();
+    showFabAfterModal();
+    window.scrollTo({ top: 0, behavior: 'instant' });
+
+    if (pageName === 'beranda') {
+        loadTodaySchedule();
+    } else if (pageName === 'kalender') {
+        renderMonthCalendar();
+        renderUpcomingTasks();
+        renderHistory(currentHistoryTab);
+    } else if (pageName === 'matkul') {
+        renderMatkulList();
     }
 }
 
@@ -1396,6 +1456,7 @@ function initSideDrawerGestures() {
 
     document.addEventListener('touchstart', (e) => {
         if (e.touches.length !== 1) return;
+        if (currentMainPage !== 'beranda') return;
         const insertModal = document.getElementById('insert-modal');
         const backupModal = document.getElementById('backup-modal');
         if (
@@ -1413,6 +1474,7 @@ function initSideDrawerGestures() {
 
     document.addEventListener('touchmove', (e) => {
         if (e.touches.length !== 1) return;
+        if (currentMainPage !== 'beranda') return;
         const insertModal = document.getElementById('insert-modal');
         const backupModal = document.getElementById('backup-modal');
         if (
@@ -1473,7 +1535,7 @@ function setupMatkulSemesterUI() {
     ensureSemesterInitialized();
     getOrCreateDrawerBlurBackdrop();
 
-    const headerEl = document.querySelector('header');
+    const headerEl = document.querySelector('#page-matkul header') || document.querySelector('header');
     if (headerEl) {
         const pEl = headerEl.querySelector('p');
         if (pEl) pEl.id = 'active-semester-subtitle';
@@ -1700,6 +1762,7 @@ function initRightDrawerGestures() {
 
     document.addEventListener('touchstart', (e) => {
         if (e.touches.length !== 1) return;
+        if (currentMainPage !== 'matkul') return;
         const matkulModal = document.getElementById('matkul-modal');
         const semModal = document.getElementById('semester-form-modal');
         if ((matkulModal && matkulModal.style.display === 'flex') || (semModal && semModal.style.display === 'flex')) return;
@@ -1714,6 +1777,7 @@ function initRightDrawerGestures() {
 
     document.addEventListener('touchmove', (e) => {
         if (e.touches.length !== 1) return;
+        if (currentMainPage !== 'matkul') return;
         const matkulModal = document.getElementById('matkul-modal');
         const semModal = document.getElementById('semester-form-modal');
         if ((matkulModal && matkulModal.style.display === 'flex') || (semModal && semModal.style.display === 'flex')) return;
@@ -1974,7 +2038,7 @@ function setupBerandaUtilityBar() {
     const scheduleListEl = document.getElementById('schedule-list');
     if (!scheduleListEl || document.getElementById('beranda-utility-bar')) return;
 
-    const headerEl = document.querySelector('header');
+    const headerEl = document.querySelector('#page-beranda header') || document.querySelector('header');
     if (!headerEl) return;
 
     const bar = document.createElement('div');
@@ -2195,30 +2259,9 @@ function jumpToTodayMonth() {
 }
 
 if(document.getElementById('calendar-grid')) {
-    const historyHeading = document.querySelector('.history-container h2, .history-container h3');
-    if (historyHeading && historyHeading.innerText.trim() === 'Riwayat Selesai') {
-        historyHeading.innerText = 'Riwayat & Terlewat';
-    }
-
-    let tabsContainer = document.querySelector('.history-tabs');
-    if (tabsContainer) {
-        const oldSemua = document.getElementById('tab-semua');
-        if (oldSemua) oldSemua.remove();
-        if (!document.getElementById('tab-terlewat')) {
-            const btnTerlewat = document.createElement('button');
-            btnTerlewat.type = 'button';
-            btnTerlewat.className = 'tab-btn';
-            btnTerlewat.id = 'tab-terlewat';
-            btnTerlewat.innerText = 'Tugas Terlewat';
-            btnTerlewat.addEventListener('click', (e) => {
-                e.stopPropagation();
-                renderHistory('Terlewat');
-            });
-            tabsContainer.appendChild(btnTerlewat);
-        }
-    }
-
-    renderMonthCalendar(); renderHistory('Tugas Kuliah'); renderUpcomingTasks();
+    renderMonthCalendar();
+    renderHistory('Tugas Kuliah');
+    renderUpcomingTasks();
     if(document.getElementById('native-month-picker')) {
         document.getElementById('native-month-picker').addEventListener('change', function(e) {
             if(e.target.value) { const p = e.target.value.split('-'); currentNavDate.setFullYear(parseInt(p[0], 10), parseInt(p[1], 10) - 1); renderMonthCalendar(); }
@@ -2849,6 +2892,7 @@ document.addEventListener("DOMContentLoaded", () => {
     ensurePolaDialogExists();
     ensureSideDrawerStickyFooter();
     document.querySelectorAll('.fab').forEach(f => f.innerHTML = iPls);
+    updateFabForCurrentPage();
     getOrCreateFabBackdrop();
     initRoutineSelectAll();
     initFabScrollBehavior();

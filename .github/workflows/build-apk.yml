@@ -1,0 +1,60 @@
+name: Build Pola APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Kode
+        uses: actions/checkout@v4
+
+      - name: Siapkan Folder Web (www)
+        run: |
+          mkdir -p www
+          find . -maxdepth 1 ! -name '.' ! -name '..' ! -name '.git' ! -name '.github' ! -name 'www' -exec cp -r {} www/ \;
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Buat Project Android dengan Capacitor
+        run: |
+          npm init -y
+          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/local-notifications
+          npx cap init "Pola" "com.pola.tracker.v2" --web-dir=www
+          npx cap add android
+
+      - name: Tambahkan Izin Alarm & Notifikasi Android
+        run: |
+          node -e '
+            const fs = require("fs");
+            const path = "android/app/src/main/AndroidManifest.xml";
+            let xml = fs.readFileSync(path, "utf8");
+            const perms = `    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n`;
+            xml = xml.replace("<application", perms + "    <application");
+            fs.writeFileSync(path, xml);
+          '
+
+      - name: Sinkronisasi & Build APK
+        run: |
+          npx cap sync android
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload File APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pola-v2-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pola - Beranda</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" type="image/png" href="img/logo.png">
+    <link rel="manifest" href="manifest.json">
+</head>
+<body>
+    <!-- ANIMASI INTRO (Aman, tidak memblokir aplikasi) -->
+    <div id="intro-screen">
+        <video id="intro-video" src="img/intro.mp4" autoplay muted playsinline></video>
+    </div>
+
+    <div class="app-container">
+        <header><h1 class="brand-title">Pola<span class="brand-dot">.</span></h1><p>Hari Ini</p></header>
+        
+        <div id="schedule-list"></div>
+
+        <div class="fab-container">
+            <div class="fab-menu" id="fab-menu">
+                <button onclick="openModal('Rutinitas')">Rutinitas</button>
+                <button onclick="openModal('Acara')">Acara</button>
+            </div>
+            <div class="fab" onclick="toggleFabMenu()"></div>
+        </div>
+    </div>
+
+    <!-- MODAL INSERT UTAMA -->
+    <div class="modal-overlay" id="insert-modal">
+        <div class="modal">
+            <h2 id="modal-title">Tambah</h2>
+            <form id="insert-form">
+                <input type="hidden" id="current-category">
+                
+                <div id="field-nama-kegiatan"><label>Nama Kegiatan *</label><input type="text" id="new-task-name"></div>
+                
+                <div id="field-matkul-dropdown" style="display:none;">
+                    <label>Mata Kuliah *</label><select id="task-matkul-select"></select>
+                </div>
+                
+                <div id="field-pengumpulan" style="display:none;"><label>Pengumpulan</label><input type="text" id="task-via"></div>
+                <div id="field-ruangan" style="display:none;"><label>Ruangan</label><input type="text" id="new-task-ruang"></div>
+
+                <div id="field-rutinitas-hari" style="display: none;">
+                    <label>Pilih Hari Rutinitas *</label>
+                    <div class="checkbox-group">
+                        <label><input type="checkbox" name="routine-days" value="Senin">Sen</label>
+                        <label><input type="checkbox" name="routine-days" value="Selasa">Sel</label>
+                        <label><input type="checkbox" name="routine-days" value="Rabu">Rab</label>
+                        <label><input type="checkbox" name="routine-days" value="Kamis">Kam</label>
+                        <label><input type="checkbox" name="routine-days" value="Jumat">Jum</label>
+                        <label><input type="checkbox" name="routine-days" value="Sabtu">Sab</label>
+                        <label><input type="checkbox" name="routine-days" value="Minggu">Min</label>
+                    </div>
+                </div>
+
+                <div id="field-tanggal"><label>Tanggal Mulai *</label><input type="date" id="new-task-date"></div>
+                <div id="field-tanggal-selesai" style="display: none;"><label>Tanggal Selesai (Opsional)</label><input type="date" id="new-task-date-end"></div>
+                
+                <div style="display: flex; gap: 10px;">
+                    <div id="field-jam" style="width: 100%;"><label>Jam Mulai *</label><input type="time" id="new-task-time"></div>
+                    <div id="field-jam-selesai" style="display:none; width: 100%;"><label>Jam Selesai</label><input type="time" id="new-task-time-end"></div>
+                </div>
+                
+                <div id="field-desc"><label>Deskripsi (Opsional)</label><textarea id="new-task-desc" rows="2"></textarea></div>
+                
+                <div id="field-warna" style="display: none;">
+                    <label>Warna Penanda</label>
+                    <div class="color-swatches" id="color-swatches-container">
+                        <div class="swatch" data-color="#4A7C59" style="background-color: #4A7C59;"></div>
+                        <div class="swatch" data-color="#364958" style="background-color: #364958;"></div>
+                        <div class="swatch" data-color="#A36B69" style="background-color: #A36B69;"></div>
+                        <div class="swatch" data-color="#795C48" style="background-color: #795C48;"></div>
+                        <div class="swatch" data-color="#3E5A47" style="background-color: #3E5A47;"></div>
+                        <div class="swatch" data-color="#723D46" style="background-color: #723D46;"></div>
+                        <div class="swatch" data-color="#5A4A6F" style="background-color: #5A4A6F;"></div>
+                        <div class="swatch" data-color="#5F7485" style="background-color: #5F7485;"></div>
+                        <div class="swatch" data-color="#AD6A51" style="background-color: #AD6A51;"></div>
+                        <div class="swatch" data-color="#8C6239" style="background-color: #8C6239;"></div>
+                    </div>
+                    <input type="hidden" id="new-task-color" value="#4A7C59">
+                </div>
+            </form>
+            <div class="modal-btns">
+                <button onclick="closeModal('insert-modal')" class="btn-cancel">Batal</button>
+                <button class="btn-save" onclick="saveNewTask()">Simpan</button>
+            </div>
+        </div>
+    </div>
+
+    <nav class="bottom-nav">
+        <a href="index.html" class="nav-item active"><svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg></a>
+        <a href="kalender.html" class="nav-item"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg></a>
+        <a href="matkul.html" class="nav-item"><svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg></a>
+    </nav>
+    <script src="script.js"></script>
+</body>
+</html>

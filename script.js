@@ -1196,7 +1196,16 @@ if(document.getElementById('calendar-grid')) {
         const oldSemua = document.getElementById('tab-semua');
         if (oldSemua) oldSemua.remove();
         if (!document.getElementById('tab-terlewat')) {
-            tabsContainer.innerHTML += `<button class="tab-btn" id="tab-terlewat" onclick="renderHistory('Terlewat')">Tugas Terlewat</button>`;
+            const btnTerlewat = document.createElement('button');
+            btnTerlewat.type = 'button';
+            btnTerlewat.className = 'tab-btn';
+            btnTerlewat.id = 'tab-terlewat';
+            btnTerlewat.innerText = 'Tugas Terlewat';
+            btnTerlewat.addEventListener('click', (e) => {
+                e.stopPropagation();
+                renderHistory('Terlewat');
+            });
+            tabsContainer.appendChild(btnTerlewat);
         }
     }
 
@@ -1216,8 +1225,13 @@ function renderMonthCalendar() {
     const realTodayStr = `${realToday.getFullYear()}-${String(realToday.getMonth()+1).padStart(2, '0')}-${String(realToday.getDate()).padStart(2, '0')}`;
     
     const monthDisplayEl = document.getElementById('month-display-text');
+    const nativePickerEl = document.getElementById('native-month-picker');
     if(monthDisplayEl) {
         monthDisplayEl.innerText = currentNavDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+        if (nativePickerEl) {
+            nativePickerEl.style.height = (monthDisplayEl.offsetHeight || 22) + 'px';
+            nativePickerEl.style.bottom = 'auto';
+        }
         const isDifferentMonth = year !== realToday.getFullYear() || month !== realToday.getMonth();
         let jumpBtn = document.getElementById('today-jump-pill');
         if (isDifferentMonth) {
@@ -1227,7 +1241,10 @@ function renderMonthCalendar() {
                 jumpBtn.type = 'button';
                 jumpBtn.className = 'today-jump-pill';
                 jumpBtn.innerText = 'Hari Ini';
-                jumpBtn.onclick = jumpToTodayMonth;
+                jumpBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    jumpToTodayMonth();
+                });
                 monthDisplayEl.parentNode.appendChild(jumpBtn);
             }
             jumpBtn.style.display = 'inline-block';
@@ -1235,7 +1252,7 @@ function renderMonthCalendar() {
             jumpBtn.style.display = 'none';
         }
     }
-    if(document.getElementById('native-month-picker')) document.getElementById('native-month-picker').value = `${year}-${String(month+1).padStart(2, '0')}`;
+    if(nativePickerEl) nativePickerEl.value = `${year}-${String(month+1).padStart(2, '0')}`;
     
     ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].forEach(d => { grid.innerHTML += `<div class="day-name">${d}</div>`; });
     const firstDay = new Date(year, month, 1).getDay(); const daysInMonth = new Date(year, month + 1, 0).getDate();

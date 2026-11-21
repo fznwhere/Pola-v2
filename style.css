@@ -375,9 +375,12 @@ header p { color: var(--text-muted); font-size: 14px; font-weight: 500; margin-t
 .calendar-header button.btn-next { right: 0; }
 
 .today-jump-pill {
+    position: relative;
+    z-index: 12;
+    pointer-events: auto;
     display: inline-block;
-    margin-top: 5px;
-    padding: 3px 11px;
+    margin-top: 6px;
+    padding: 4px 13px;
     font-size: 11px;
     font-weight: 700;
     color: var(--btn-primary);
@@ -438,8 +441,8 @@ header p { color: var(--text-muted); font-size: 14px; font-weight: 500; margin-t
 .countdown-badge { background: #FFFFFF; color: var(--text-main); padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 800; display: inline-block; white-space: nowrap; align-self: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
 .countdown-alert { color: var(--alert-brutal); }
 .upcoming-container, .history-container { margin-top: 35px; }
-.history-tabs { display: flex; gap: 8px; margin-bottom: 15px; margin-top: 10px; }
-.tab-btn { flex: 1; background: var(--bg-card); color: var(--text-muted); border: 1px solid var(--border-line); padding: 10px 6px; border-radius: 8px; font-size: 13px; font-weight: bold; cursor: pointer; }
+.history-tabs { display: flex; gap: 8px; margin-bottom: 15px; margin-top: 10px; position: relative; z-index: 16; }
+.tab-btn { flex: 1; background: var(--bg-card); color: var(--text-muted); border: 1px solid var(--border-line); padding: 10px 4px; border-radius: 8px; font-size: 12px; font-weight: bold; cursor: pointer; pointer-events: auto; }
 .tab-btn.active { background: var(--text-main); color: white; border-color: var(--text-main); }
 
 .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(45, 42, 38, 0.6); display: none; justify-content: center; align-items: center; z-index: 35; backdrop-filter: blur(2px); }

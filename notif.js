@@ -200,7 +200,6 @@ async function syncAndroidAlarms() {
           body: `Mulai pukul ${item.time}${detail} • ${item.category}`,
           channelId: POLA_CHANNEL_ID,
           smallIcon: 'ic_stat_pola',
-          largeIcon: 'ic_large_pola',
           iconColor: '#C85A32',
           schedule: { at: pre5Date, allowWhileIdle: true }
         });
@@ -214,7 +213,6 @@ async function syncAndroidAlarms() {
           body: `Jadwal pukul ${item.time}${detail}`,
           channelId: POLA_CHANNEL_ID,
           smallIcon: 'ic_stat_pola',
-          largeIcon: 'ic_large_pola',
           iconColor: '#C85A32',
           schedule: { at: exactDate, allowWhileIdle: true }
         });

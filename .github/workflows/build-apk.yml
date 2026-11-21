@@ -35,18 +35,46 @@ jobs:
           npx cap init "Pola" "com.pola.tracker.v2" --web-dir=www
           npx cap add android
 
-      - name: Pasang Ikon Aplikasi Pola
+      - name: Pasang Ikon Aplikasi & Notifikasi Pola
         run: |
           npm install @capacitor/assets --save-dev
+          mkdir -p android/app/src/main/res/drawable
           node -e '
             (async () => {
+              const fs = require("fs");
               const sharp = require("sharp");
               const bg = { r: 250, g: 247, b: 242, alpha: 1 };
               const transparent = { r: 0, g: 0, b: 0, alpha: 0 };
 
-              await sharp("assets/icons/logo.png")
-                .resize(640, 640, { fit: "contain", background: transparent })
-                .extend({ top: 192, bottom: 192, left: 192, right: 192, background: transparent })
+              // Ekstrak tulisan "Pola." dengan warna aslinya & siluet putih
+              const { data, info } = await sharp("assets/icons/logo.png")
+                .ensureAlpha()
+                .raw()
+                .toBuffer({ resolveWithObject: true });
+
+              const colorText = Buffer.from(data);
+              const whiteSilhouette = Buffer.from(data);
+
+              for (let i = 0; i < data.length; i += 4) {
+                const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+                const isBgCream = r > 220 && g > 220 && b > 210;
+                if (a < 50 || isBgCream) {
+                  colorText[i + 3] = 0;
+                  whiteSilhouette[i] = 0; whiteSilhouette[i + 1] = 0; whiteSilhouette[i + 2] = 0; whiteSilhouette[i + 3] = 0;
+                } else {
+                  whiteSilhouette[i] = 255; whiteSilhouette[i + 1] = 255; whiteSilhouette[i + 2] = 255; whiteSilhouette[i + 3] = 255;
+                }
+              }
+
+              const croppedText = await sharp(colorText, { raw: { width: info.width, height: info.height, channels: 4 } })
+                .trim()
+                .png()
+                .toBuffer();
+
+              // 1. Ikon Launcher HP (Tulisan Pola. diperbesar maksimal dalam safe zone 66%)
+              await sharp(croppedText)
+                .resize(660, 660, { fit: "contain", background: transparent })
+                .extend({ top: 182, bottom: 182, left: 182, right: 182, background: transparent })
                 .png()
                 .toFile("assets/icon-foreground.png");
 
@@ -56,23 +84,23 @@ jobs:
                 .png()
                 .toFile("assets/icon-background.png");
 
-              await sharp("assets/icons/logo.png")
-                .resize(820, 820, { fit: "contain", background: bg })
-                .extend({ top: 102, bottom: 102, left: 102, right: 102, background: bg })
+              await sharp(croppedText)
+                .resize(780, 780, { fit: "contain", background: bg })
+                .extend({ top: 122, bottom: 122, left: 122, right: 122, background: bg })
                 .png()
                 .toFile("assets/icon-only.png");
-            })();
-          '
-          npx capacitor-assets generate --android
 
-      - name: Pasang Ikon Notifikasi Status Bar
-        run: |
-          mkdir -p android/app/src/main/res/drawable
-          cp assets/icons/logo.png android/app/src/main/res/drawable/ic_large_pola.png
-          node -e '
-            (async () => {
-              const fs = require("fs");
-              const sharp = require("sharp");
+              // 2. Ikon Kecil Status Bar Notifikasi
+              if (fs.existsSync("assets/icons/ic_stat_pola.png")) {
+                fs.copyFileSync("assets/icons/ic_stat_pola.png", "android/app/src/main/res/drawable/ic_stat_pola.png");
+              } else {
+                await sharp(whiteSilhouette, { raw: { width: info.width, height: info.height, channels: 4 } })
+                  .trim()
+                  .resize(86, 86, { fit: "contain", background: transparent })
+                  .extend({ top: 5, bottom: 5, left: 5, right: 5, background: transparent })
+                  .png()
+                  .toFile("android/app/src/main/res/drawable/ic_stat_pola.png");
+              }
 
               const cfg = JSON.parse(fs.readFileSync("capacitor.config.json", "utf8"));
               cfg.plugins = cfg.plugins || {};
@@ -81,35 +109,9 @@ jobs:
                 iconColor: "#C85A32"
               };
               fs.writeFileSync("capacitor.config.json", JSON.stringify(cfg, null, 2));
-
-              if (fs.existsSync("assets/icons/ic_stat_pola.png")) {
-                fs.copyFileSync("assets/icons/ic_stat_pola.png", "android/app/src/main/res/drawable/ic_stat_pola.png");
-                return;
-              }
-
-              const { data, info } = await sharp("assets/icons/logo.png")
-                .ensureAlpha()
-                .raw()
-                .toBuffer({ resolveWithObject: true });
-
-              for (let i = 0; i < data.length; i += 4) {
-                const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
-                const isBgCream = r > 220 && g > 220 && b > 210;
-                if (a < 50 || isBgCream) {
-                  data[i] = 0; data[i + 1] = 0; data[i + 2] = 0; data[i + 3] = 0;
-                } else {
-                  data[i] = 255; data[i + 1] = 255; data[i + 2] = 255; data[i + 3] = 255;
-                }
-              }
-
-              await sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } })
-                .trim()
-                .resize(84, 84, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
-                .extend({ top: 6, bottom: 6, left: 6, right: 6, background: { r: 0, g: 0, b: 0, alpha: 0 } })
-                .png()
-                .toFile("android/app/src/main/res/drawable/ic_stat_pola.png");
             })();
           '
+          npx capacitor-assets generate --android
 
       - name: Tambahkan Izin Alarm & Notifikasi Android
         run: |

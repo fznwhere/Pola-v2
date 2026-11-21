@@ -1,4 +1,5 @@
 let currentNavDate = new Date(); let editId = null; const namaHari = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']; let currentHistoryTab = 'Tugas Kuliah';
+let currentDrawerTab = 'Rutinitas';
 
 const liburNasional = {
     "2026-01-01": "Tahun Baru Masehi", "2026-02-18": "Isra Mikraj", "2026-02-19": "Tahun Baru Imlek", "2026-03-20": "Hari Raya Nyepi / Idul Fitri",
@@ -32,11 +33,307 @@ function hideFabForModal() {
 }
 
 function showFabAfterModal() {
+    const drawer = document.getElementById('side-drawer');
+    if (drawer && drawer.classList.contains('open')) return;
     const target = getFabContainer();
     if (target) {
         target.classList.remove('fab-modal-hidden');
         target.classList.remove('fab-scroll-hidden');
     }
+}
+
+// --- PANEL GESER KIRI (GEMINI-STYLE DRAWER) ---
+function openSideDrawer() {
+    const drawer = document.getElementById('side-drawer');
+    const backdrop = document.getElementById('drawer-backdrop');
+    if (!drawer) return;
+    drawer.style.transition = '';
+    drawer.style.transform = '';
+    drawer.classList.add('open');
+    drawer.setAttribute('aria-hidden', 'false');
+    if (backdrop) {
+        backdrop.style.transition = '';
+        backdrop.style.opacity = '';
+        backdrop.classList.add('show');
+    }
+    hideFabForModal();
+    renderSideDrawerContent();
+}
+
+function closeSideDrawer() {
+    const drawer = document.getElementById('side-drawer');
+    const backdrop = document.getElementById('drawer-backdrop');
+    if (!drawer) return;
+    drawer.style.transition = '';
+    drawer.style.transform = '';
+    drawer.classList.remove('open');
+    drawer.setAttribute('aria-hidden', 'true');
+    if (backdrop) {
+        backdrop.style.transition = '';
+        backdrop.style.opacity = '';
+        backdrop.classList.remove('show');
+    }
+    const insertModal = document.getElementById('insert-modal');
+    if (!insertModal || insertModal.style.display !== 'flex') {
+        showFabAfterModal();
+    }
+}
+
+function switchDrawerTab(tabName) {
+    currentDrawerTab = tabName;
+    if (document.getElementById('dtab-rutinitas')) document.getElementById('dtab-rutinitas').classList.toggle('active', tabName === 'Rutinitas');
+    if (document.getElementById('dtab-acara')) document.getElementById('dtab-acara').classList.toggle('active', tabName === 'Acara');
+    if (document.getElementById('dtab-libur')) document.getElementById('dtab-libur').classList.toggle('active', tabName === 'Libur');
+    renderSideDrawerContent();
+}
+
+function openModalFromDrawer() {
+    closeSideDrawer();
+    openModal(currentDrawerTab);
+}
+
+function renderSideDrawerContent() {
+    const container = document.getElementById('drawer-content-list');
+    const labelEl = document.getElementById('drawer-section-label');
+    if (!container) return;
+
+    if (currentDrawerTab === 'Rutinitas') {
+        if (labelEl) labelEl.innerText = 'Data Rutinitas';
+        const routines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
+        if (routines.length === 0) {
+            container.innerHTML = '<p style="color:var(--text-muted); font-size:13px; text-align:center; margin-top:24px;">Belum ada data rutinitas.</p>';
+            return;
+        }
+        let html = '';
+        routines.forEach(r => {
+            html += `
+                <div class="card" onclick="toggleDetail(this)">
+                    <div class="card-header" style="background-color: ${r.color || 'var(--color-rutin)'};">
+                        <div class="card-header-top">
+                            <div class="card-title-group">
+                                <div>
+                                    <h3>${r.name}</h3>
+                                    <small class="time-badge">${iClk} ${r.time} • ${r.days.length === 7 ? 'Setiap Hari' : r.days.join(', ')}</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-detail">
+                        <p>${r.desc || 'Rutinitas Mingguan'}</p>
+                        <div class="card-actions three-btns">
+                            <button class="icon-btn delete" onclick="event.stopPropagation(); deleteRoutine(${r.id})">${iDel} Hapus</button>
+                            <div><button class="icon-btn" onclick="event.stopPropagation(); closeSideDrawer(); openEditRoutine(${r.id})">${iEdt} Edit</button></div>
+                        </div>
+                    </div>
+                </div>`;
+        });
+        container.innerHTML = html;
+    } else if (currentDrawerTab === 'Acara') {
+        if (labelEl) labelEl.innerText = 'Data Acara';
+        const tasks = JSON.parse(localStorage.getItem('nalaTasks')) || [];
+        const acaras = tasks.filter(t => t.category === 'Acara').sort((a, b) => b.date.localeCompare(a.date));
+        if (acaras.length === 0) {
+            container.innerHTML = '<p style="color:var(--text-muted); font-size:13px; text-align:center; margin-top:24px;">Belum ada data acara.</p>';
+            return;
+        }
+        let html = '';
+        acaras.forEach(t => {
+            const dateText = t.endDate && t.endDate !== t.date ? `${formatShortDate(t.date)} s/d ${formatShortDate(t.endDate)}` : formatShortDate(t.date);
+            html += `
+                <div class="card" onclick="toggleDetail(this)">
+                    <div class="card-header" style="background-color: ${t.color || 'var(--color-acara)'};">
+                        <div class="card-header-top">
+                            <div class="card-title-group">
+                                <div>
+                                    <h3>${t.name}</h3>
+                                    <small class="time-badge">${iDat} ${dateText}   ${iClk} ${t.time}</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-detail">
+                        <p>${t.deskripsi || 'Tidak ada deskripsi.'}</p>
+                        ${t.ruang ? `<div style="margin-top:10px; padding-top:10px; border-top:1px dashed var(--border-line); font-size:12px;"><span>Tempat:</span> <strong>${t.ruang}</strong></div>` : ''}
+                        <div class="card-actions three-btns">
+                            <button class="icon-btn delete" onclick="event.stopPropagation(); deleteTask(${t.id})">${iDel} Hapus</button>
+                            <div><button class="icon-btn" onclick="event.stopPropagation(); closeSideDrawer(); openEditTask(${t.id}, 'Acara')">${iEdt} Edit</button></div>
+                        </div>
+                    </div>
+                </div>`;
+        });
+        container.innerHTML = html;
+    } else if (currentDrawerTab === 'Libur') {
+        if (labelEl) labelEl.innerText = 'Data Libur';
+        const libur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
+        if (libur.length === 0) {
+            container.innerHTML = '<p style="color:var(--text-muted); font-size:13px; text-align:center; margin-top:24px;">Belum ada jadwal libur khusus.</p>';
+            return;
+        }
+        let html = '';
+        libur.forEach(l => {
+            const dateText = l.startDate === l.endDate ? formatShortDate(l.startDate) : `${formatShortDate(l.startDate)} s/d ${formatShortDate(l.endDate)}`;
+            html += `
+                <div class="card" onclick="toggleDetail(this)">
+                    <div class="card-header" style="background-color: var(--color-minggu);">
+                        <div class="card-header-top">
+                            <div class="card-title-group">
+                                <div>
+                                    <h3>${l.name}</h3>
+                                    <small class="time-badge">${iDat} ${dateText}</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-detail">
+                        <p>Libur Kampus / Pribadi</p>
+                        <div class="card-actions three-btns">
+                            <button class="icon-btn delete" onclick="event.stopPropagation(); deleteLibur(${l.id})">${iDel} Hapus</button>
+                            <div><button class="icon-btn" onclick="event.stopPropagation(); closeSideDrawer(); openEditLibur(${l.id})">${iEdt} Edit</button></div>
+                        </div>
+                    </div>
+                </div>`;
+        });
+        container.innerHTML = html;
+    }
+}
+
+function initSideDrawerGestures() {
+    const drawer = document.getElementById('side-drawer');
+    const backdrop = document.getElementById('drawer-backdrop');
+    if (!drawer) return;
+
+    let startX = 0;
+    let startY = 0;
+    let currentX = 0;
+    let gestureDecided = false;
+    let isDragging = false;
+    let startedOpen = false;
+
+    document.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1) return;
+        const insertModal = document.getElementById('insert-modal');
+        if (insertModal && insertModal.style.display === 'flex') return;
+
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        currentX = startX;
+        gestureDecided = false;
+        isDragging = false;
+        startedOpen = drawer.classList.contains('open');
+    }, { passive: true });
+
+    document.addEventListener('touchmove', (e) => {
+        if (e.touches.length !== 1) return;
+        const insertModal = document.getElementById('insert-modal');
+        if (insertModal && insertModal.style.display === 'flex') return;
+
+        currentX = e.touches[0].clientX;
+        const dx = currentX - startX;
+        const dy = e.touches[0].clientY - startY;
+
+        if (!gestureDecided) {
+            if (Math.abs(dx) < 14 && Math.abs(dy) < 14) return;
+            gestureDecided = true;
+            if (Math.abs(dx) > Math.abs(dy) * 1.35) {
+                if (!startedOpen && dx > 0) isDragging = true;
+                if (startedOpen && dx < 0) isDragging = true;
+            }
+            if (isDragging) {
+                drawer.style.transition = 'none';
+                if (backdrop) {
+                    backdrop.style.transition = 'none';
+                    backdrop.classList.add('show');
+                }
+                if (!startedOpen) renderSideDrawerContent();
+            }
+        }
+
+        if (!isDragging) return;
+        const drawerWidth = drawer.offsetWidth || 300;
+        let progress = startedOpen ? 1 + dx / drawerWidth : dx / drawerWidth;
+        progress = Math.max(0, Math.min(1, progress));
+
+        drawer.style.transform = `translateX(${(progress - 1) * 100}%)`;
+        if (backdrop) backdrop.style.opacity = String(progress);
+    }, { passive: true });
+
+    document.addEventListener('touchend', () => {
+        if (!isDragging) return;
+        isDragging = false;
+        const dx = currentX - startX;
+        const drawerWidth = drawer.offsetWidth || 300;
+        const threshold = drawerWidth * 0.28;
+
+        if (!startedOpen) {
+            if (dx > threshold) openSideDrawer();
+            else closeSideDrawer();
+        } else {
+            if (dx < -threshold) closeSideDrawer();
+            else openSideDrawer();
+        }
+    });
+}
+
+function exportPolaBackup() {
+    const payload = {
+        app: 'Pola.',
+        exportedAt: new Date().toISOString(),
+        data: {
+            nalaMatkul: JSON.parse(localStorage.getItem('nalaMatkul')) || [],
+            nalaTasks: JSON.parse(localStorage.getItem('nalaTasks')) || [],
+            nalaRoutines: JSON.parse(localStorage.getItem('nalaRoutines')) || [],
+            nalaOverrides: JSON.parse(localStorage.getItem('nalaOverrides')) || [],
+            nalaLibur: JSON.parse(localStorage.getItem('nalaLibur')) || []
+        }
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const todayStr = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `pola-backup-${todayStr}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function triggerImportBackup() {
+    const input = document.getElementById('import-backup-input');
+    if (input) {
+        input.value = '';
+        input.click();
+    }
+}
+
+function handleImportBackup(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function (e) {
+        try {
+            const parsed = JSON.parse(e.target.result);
+            const data = parsed.data ? parsed.data : parsed;
+            if (!data || (!Array.isArray(data.nalaMatkul) && !Array.isArray(data.nalaTasks) && !Array.isArray(data.nalaRoutines))) {
+                alert('Format file cadangan tidak valid.');
+                return;
+            }
+            if (!confirm('Pulihkan data dari file ini? Data saat ini akan diganti dengan isi file cadangan.')) return;
+
+            if (Array.isArray(data.nalaMatkul)) localStorage.setItem('nalaMatkul', JSON.stringify(data.nalaMatkul));
+            if (Array.isArray(data.nalaTasks)) localStorage.setItem('nalaTasks', JSON.stringify(data.nalaTasks));
+            if (Array.isArray(data.nalaRoutines)) localStorage.setItem('nalaRoutines', JSON.stringify(data.nalaRoutines));
+            if (Array.isArray(data.nalaOverrides)) localStorage.setItem('nalaOverrides', JSON.stringify(data.nalaOverrides));
+            if (Array.isArray(data.nalaLibur)) localStorage.setItem('nalaLibur', JSON.stringify(data.nalaLibur));
+
+            refreshAllViews();
+            alert('Data berhasil dipulihkan!');
+        } catch (err) {
+            alert('Gagal membaca file JSON.');
+        }
+    };
+    reader.readAsText(file);
 }
 
 function getOrCreateFabBackdrop() {
@@ -80,7 +377,6 @@ function initFabScrollBehavior() {
         const menu = document.getElementById('fab-menu');
         if (!target) return;
 
-        // Jangan sembunyikan saat menu cabang sedang terbuka atau modal sedang aktif
         if ((menu && menu.classList.contains('show')) || target.classList.contains('fab-modal-hidden')) {
             lastScrollY = currentScrollY;
             return;
@@ -97,7 +393,6 @@ function initFabScrollBehavior() {
 }
 
 function ensureReminderFieldsInjected() {
-    // 1. Suntikkan ke #insert-form (untuk kalender.html jika belum ada)
     const insertForm = document.getElementById('insert-form');
     if (insertForm && !document.getElementById('field-reminder')) {
         const div = document.createElement('div');
@@ -118,7 +413,6 @@ function ensureReminderFieldsInjected() {
         else insertForm.appendChild(div);
     }
 
-    // 2. Suntikkan ke #matkul-form (untuk halaman Kuliah / matkul.html)
     const matkulForm = document.getElementById('matkul-form');
     if (matkulForm && !document.getElementById('field-matkul-reminder')) {
         const div = document.createElement('div');
@@ -238,6 +532,7 @@ function deleteLibur(id) {
 
 function refreshAllViews() {
     if(document.getElementById('schedule-list')) loadTodaySchedule();
+    if(document.getElementById('side-drawer')) renderSideDrawerContent();
     if(document.getElementById('calendar-grid')) { renderMonthCalendar(); renderUpcomingTasks(); renderHistory(currentHistoryTab); }
     if(document.getElementById('matkul-list')) renderMatkulList();
 }
@@ -335,10 +630,39 @@ async function loadTodaySchedule() {
 }
 
 // --- KALENDER ---
+function getOverdueTasks() {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    return (JSON.parse(localStorage.getItem('nalaTasks')) || []).filter(t => {
+        if (t.status === 'done') return false;
+        if (t.category !== 'Tugas Kuliah' && t.category !== 'Tugas') return false;
+        const taskDate = new Date(t.date); taskDate.setHours(0, 0, 0, 0);
+        return taskDate < today;
+    });
+}
+
+function updateOverdueTabLabel() {
+    const tabTerlewat = document.getElementById('tab-terlewat');
+    if (!tabTerlewat) return;
+    const count = getOverdueTasks().length;
+    tabTerlewat.innerText = count > 0 ? `Tugas Terlewat (${count})` : 'Tugas Terlewat';
+}
+
 if(document.getElementById('calendar-grid')) {
-    renderMonthCalendar(); renderHistory('Tugas Kuliah'); renderUpcomingTasks();
+    const historyHeading = document.querySelector('.history-container h2, .history-container h3');
+    if (historyHeading && historyHeading.innerText.trim() === 'Riwayat Selesai') {
+        historyHeading.innerText = 'Riwayat & Terlewat';
+    }
+
     let tabsContainer = document.querySelector('.history-tabs');
-    if(tabsContainer && !document.getElementById('tab-semua')) { tabsContainer.innerHTML += `<button class="tab-btn" id="tab-semua" onclick="renderHistory('Semua')">Semua Data</button>`; }
+    if (tabsContainer) {
+        const oldSemua = document.getElementById('tab-semua');
+        if (oldSemua) oldSemua.remove();
+        if (!document.getElementById('tab-terlewat')) {
+            tabsContainer.innerHTML += `<button class="tab-btn" id="tab-terlewat" onclick="renderHistory('Terlewat')">Tugas Terlewat</button>`;
+        }
+    }
+
+    renderMonthCalendar(); renderHistory('Tugas Kuliah'); renderUpcomingTasks();
     if(document.getElementById('native-month-picker')) {
         document.getElementById('native-month-picker').addEventListener('change', function(e) {
             if(e.target.value) { const p = e.target.value.split('-'); currentNavDate.setFullYear(parseInt(p[0]), parseInt(p[1]) - 1); renderMonthCalendar(); }
@@ -402,14 +726,20 @@ function renderMonthCalendar() {
 
 function renderUpcomingTasks() {
     const list = document.getElementById('upcoming-list'); if(!list) return; list.innerHTML = '';
-    let pendingTasks = (JSON.parse(localStorage.getItem('nalaTasks')) || []).filter(t => t.status !== 'done' && (t.category === 'Tugas Kuliah' || t.category === 'Tugas'));
-    if(pendingTasks.length === 0) { list.innerHTML = '<p style="color:var(--text-muted); font-size:14px;">Semua tugas sudah beres.</p>'; return; }
-
     const today = new Date(); today.setHours(0,0,0,0);
+
+    let pendingTasks = (JSON.parse(localStorage.getItem('nalaTasks')) || []).filter(t => {
+        if (t.status === 'done' || (t.category !== 'Tugas Kuliah' && t.category !== 'Tugas')) return false;
+        let taskDate = new Date(t.date); taskDate.setHours(0,0,0,0);
+        return taskDate >= today;
+    });
+
+    if(pendingTasks.length === 0) { list.innerHTML = '<p style="color:var(--text-muted); font-size:14px;">Semua tugas aktif sudah beres.</p>'; return; }
+
     pendingTasks.sort((a,b) => new Date(a.date) - new Date(b.date)).forEach(t => {
         let taskDate = new Date(t.date); taskDate.setHours(0,0,0,0);
         let diffDays = Math.ceil((taskDate - today) / (1000 * 60 * 60 * 24));
-        let badgeClass = 'countdown-badge'; let badgeText = diffDays < 0 ? 'Terlewat!' : diffDays === 0 ? 'Hari Ini!' : diffDays === 1 ? 'Besok!' : `H-${diffDays}`;
+        let badgeClass = 'countdown-badge'; let badgeText = diffDays === 0 ? 'Hari Ini!' : diffDays === 1 ? 'Besok!' : `H-${diffDays}`;
         if(diffDays <= 1) badgeClass += ' countdown-alert';
 
         list.innerHTML += `
@@ -442,34 +772,35 @@ function renderHistory(tabName) {
     currentHistoryTab = tabName; 
     if(document.getElementById('tab-tk')) document.getElementById('tab-tk').classList.toggle('active', tabName === 'Tugas Kuliah'); 
     if(document.getElementById('tab-tb')) document.getElementById('tab-tb').classList.toggle('active', tabName === 'Tugas');
-    if(document.getElementById('tab-semua')) document.getElementById('tab-semua').classList.toggle('active', tabName === 'Semua');
+    if(document.getElementById('tab-terlewat')) document.getElementById('tab-terlewat').classList.toggle('active', tabName === 'Terlewat');
+    updateOverdueTabLabel();
     
     let list = document.getElementById('history-list'); if(!list) return; list.innerHTML = '';
-    
-    if (tabName === 'Semua') {
-        let tasks = JSON.parse(localStorage.getItem('nalaTasks')) || [];
-        let routines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
-        let libur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
-        let allDataHtml = '';
-        
-        tasks.filter(t => t.category === 'Acara').sort((a,b) => b.date.localeCompare(a.date)).forEach(t => {
-            let dateText = t.endDate && t.endDate !== t.date ? `${formatShortDate(t.date)} s/d ${formatShortDate(t.endDate)}` : formatShortDate(t.date);
-            allDataHtml += `
-                <div class="card history-card" onclick="toggleDetail(this)">
-                    <div class="card-header" style="background-color: ${t.color || 'var(--color-acara)'}; opacity:0.9;">
+
+    if (tabName === 'Terlewat') {
+        const overdueTasks = getOverdueTasks().sort((a, b) => a.date.localeCompare(b.date));
+        if (overdueTasks.length === 0) {
+            list.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center;">Tidak ada tugas yang terlewat.</p>';
+            return;
+        }
+        overdueTasks.forEach(t => {
+            list.innerHTML += `
+                <div class="card" onclick="toggleDetail(this)">
+                    <div class="card-header" style="background-color: ${t.color || 'var(--color-tugas)'};">
                         <div class="card-header-top">
                             <div class="card-title-group">
+                                <button class="check-btn" onclick="event.stopPropagation(); toggleTaskDone('${t.id}')">${iCir}</button>
                                 <div>
-                                    <h3 style="color:#FFFFFF;">${t.name}</h3>
-                                    <small style="color:var(--state-dimmed);">${iDat} ${dateText}   ${iClk} ${t.time} ${t.endTime ? '- '+t.endTime : ''}</small>
+                                    <h3>${t.name}</h3>
+                                    <small>${iDat} ${formatShortDate(t.date)}   ${iClk} ${t.time}</small>
                                 </div>
                             </div>
-                            <span class="tag-pill">Acara</span>
+                            <span class="countdown-badge countdown-alert">Terlewat!</span>
                         </div>
                     </div>
                     <div class="card-detail">
-                        <p>${t.deskripsi || 'Tidak ada deskripsi'}</p>
-                        ${t.ruang ? `<div style="margin-top:12px; padding-top:12px; border-top:1px dashed var(--border-line); font-size:13px;"><span>Tempat:</span> <strong>${t.ruang}</strong></div>` : ''}
+                        <p style="margin-bottom:12px; line-height:1.5;">${t.deskripsi || t.category}</p>
+                        ${t.pengumpulan ? `<div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px dashed var(--border-line); font-size:13px;"><strong>Via:</strong> ${t.pengumpulan}</div>` : ''}
                         <div class="card-actions three-btns">
                             <button class="icon-btn delete" onclick="event.stopPropagation(); deleteTask(${t.id})">${iDel} Hapus</button>
                             <div><button class="icon-btn" onclick="event.stopPropagation(); openEditTask(${t.id}, '${t.category}')">${iEdt} Edit</button></div>
@@ -477,58 +808,6 @@ function renderHistory(tabName) {
                     </div>
                 </div>`;
         });
-        
-        routines.forEach(r => {
-            allDataHtml += `
-                <div class="card history-card" onclick="toggleDetail(this)">
-                    <div class="card-header" style="background-color: ${r.color || 'var(--color-rutin)'}; opacity:0.9;">
-                        <div class="card-header-top">
-                            <div class="card-title-group">
-                                <div>
-                                    <h3 style="color:#FFFFFF;">${r.name}</h3>
-                                    <small style="color:var(--state-dimmed);">${iClk} ${r.time} | Setiap: ${r.days.join(', ')}</small>
-                                </div>
-                            </div>
-                            <span class="tag-pill">Rutinitas</span>
-                        </div>
-                    </div>
-                    <div class="card-detail">
-                        <p>${r.desc || 'Rutinitas Mingguan'}</p>
-                        <div class="card-actions three-btns">
-                            <button class="icon-btn delete" onclick="event.stopPropagation(); deleteRoutine(${r.id})">${iDel} Hapus</button>
-                            <div><button class="icon-btn" onclick="event.stopPropagation(); openEditRoutine(${r.id})">${iEdt} Edit</button></div>
-                        </div>
-                    </div>
-                </div>`;
-        });
-        
-        libur.forEach(l => {
-            let dateText = l.startDate === l.endDate ? formatShortDate(l.startDate) : `${formatShortDate(l.startDate)} s/d ${formatShortDate(l.endDate)}`;
-            allDataHtml += `
-                <div class="card history-card" onclick="toggleDetail(this)">
-                    <div class="card-header" style="background-color: var(--color-minggu); opacity:0.9;">
-                        <div class="card-header-top">
-                            <div class="card-title-group">
-                                <div>
-                                    <h3 style="color:#FFFFFF;">${l.name}</h3>
-                                    <small style="color:var(--state-dimmed);">${iDat} ${dateText}</small>
-                                </div>
-                            </div>
-                            <span class="tag-pill">Libur</span>
-                        </div>
-                    </div>
-                    <div class="card-detail">
-                        <p>Libur Kampus / Pribadi</p>
-                        <div class="card-actions three-btns">
-                            <button class="icon-btn delete" onclick="event.stopPropagation(); deleteLibur(${l.id})">${iDel} Hapus</button>
-                            <div><button class="icon-btn" onclick="event.stopPropagation(); openEditLibur(${l.id})">${iEdt} Edit</button></div>
-                        </div>
-                    </div>
-                </div>`;
-        });
-        
-        if(!allDataHtml) list.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center;">Database Acara & Rutinitas kosong.</p>';
-        else list.innerHTML = allDataHtml;
         return;
     }
 
@@ -931,6 +1210,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initRoutineSelectAll();
     initFabScrollBehavior();
     ensureReminderFieldsInjected();
+    initSideDrawerGestures();
 
     document.querySelectorAll('.swatch').forEach(sw => { 
         sw.addEventListener('click', function(e) { 

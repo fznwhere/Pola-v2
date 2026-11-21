@@ -7,10 +7,6 @@ let editSemesterId = null;
 let pendingBackupPayload = null;
 const fetchingHolidayYears = new Set();
 
-let activeSalatAudio = null;
-let activeSalatAudioUrl = null;
-let activeSalatOscCtx = null;
-
 // Data dasar libur nasional (cadangan offline instan)
 const defaultLiburNasional = {
     "2026-01-01": "Tahun Baru Masehi",
@@ -64,287 +60,6 @@ const iDel = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${st
 const iPin = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${strk}" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>`;
 const iRef = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${strk}" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>`;
 const iBkp = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="var(--btn-primary)" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`;
-const iVol = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${strk}" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>`;
-
-// --- SUARA KHUSUS PENGINGAT JADWAL SALAT ---
-function getSalatSoundConfig() {
-    try {
-        const cfg = JSON.parse(localStorage.getItem('nalaSalatSoundConfig'));
-        if (cfg && cfg.type && cfg.name) return cfg;
-    } catch (e) {}
-    return { type: 'preset_adzan', name: 'Nada Adzan Lembut' };
-}
-
-function saveSalatSoundConfig(cfg) {
-    localStorage.setItem('nalaSalatSoundConfig', JSON.stringify(cfg));
-    document.querySelectorAll('.salat-sound-label-text').forEach((el) => {
-        el.innerText = cfg.name;
-    });
-    if (typeof syncAndroidAlarms === 'function') syncAndroidAlarms();
-}
-
-function openSalatAudioDB() {
-    return new Promise((resolve, reject) => {
-        if (!window.indexedDB) {
-            reject(new Error('IndexedDB tidak didukung'));
-            return;
-        }
-        const req = indexedDB.open('nalaAudioDB', 1);
-        req.onupgradeneeded = (e) => {
-            const db = e.target.result;
-            if (!db.objectStoreNames.contains('sounds')) {
-                db.createObjectStore('sounds');
-            }
-        };
-        req.onsuccess = (e) => resolve(e.target.result);
-        req.onerror = (e) => reject(e.target.error);
-    });
-}
-
-async function storeCustomSalatAudioBlob(blob) {
-    const db = await openSalatAudioDB();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction('sounds', 'readwrite');
-        tx.objectStore('sounds').put(blob, 'salat_custom_audio');
-        tx.oncomplete = () => resolve(true);
-        tx.onerror = (e) => reject(e.target.error);
-    });
-}
-
-async function getCustomSalatAudioBlob() {
-    try {
-        const db = await openSalatAudioDB();
-        return new Promise((resolve) => {
-            const tx = db.transaction('sounds', 'readonly');
-            const req = tx.objectStore('sounds').get('salat_custom_audio');
-            req.onsuccess = () => resolve(req.result || null);
-            req.onerror = () => resolve(null);
-        });
-    } catch (e) {
-        return null;
-    }
-}
-
-function stopSalatReminderSound() {
-    if (activeSalatAudio) {
-        try {
-            activeSalatAudio.pause();
-            activeSalatAudio.currentTime = 0;
-        } catch (e) {}
-        activeSalatAudio = null;
-    }
-    if (activeSalatAudioUrl) {
-        try {
-            URL.revokeObjectURL(activeSalatAudioUrl);
-        } catch (e) {}
-        activeSalatAudioUrl = null;
-    }
-    if (activeSalatOscCtx) {
-        try {
-            activeSalatOscCtx.close();
-        } catch (e) {}
-        activeSalatOscCtx = null;
-    }
-    document.querySelectorAll('.btn-test-salat-sound').forEach((btn) => {
-        btn.innerHTML = `${iVol} Tes`;
-    });
-}
-
-function playSynthesizedSalatTone(variant = 'preset_adzan', onEnded = null) {
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtx) return;
-
-    const ctx = new AudioCtx();
-    activeSalatOscCtx = ctx;
-
-    // Pola nada lembut bernuansa adzan (Hijaz) atau gema masjid
-    const notes = variant === 'preset_gema'
-        ? [
-            { freq: 392.00, start: 0.0, dur: 0.55 }, // G4
-            { freq: 493.88, start: 0.45, dur: 0.55 }, // B4
-            { freq: 587.33, start: 0.90, dur: 0.85 }, // D5
-            { freq: 493.88, start: 1.70, dur: 0.55 }, // B4
-            { freq: 392.00, start: 2.20, dur: 1.00 }  // G4
-        ]
-        : [
-            { freq: 293.66, start: 0.0, dur: 0.55 }, // D4
-            { freq: 311.13, start: 0.50, dur: 0.45 }, // Eb4
-            { freq: 369.99, start: 0.90, dur: 0.65 }, // F#4
-            { freq: 392.00, start: 1.50, dur: 0.75 }, // G4
-            { freq: 369.99, start: 2.20, dur: 0.45 }, // F#4
-            { freq: 311.13, start: 2.60, dur: 0.45 }, // Eb4
-            { freq: 293.66, start: 3.00, dur: 1.05 }  // D4
-        ];
-
-    const now = ctx.currentTime + 0.05;
-    let maxEnd = 0;
-
-    notes.forEach((n) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(n.freq, now + n.start);
-
-        gain.gain.setValueAtTime(0.0001, now + n.start);
-        gain.gain.exponentialRampToValueAtTime(0.24, now + n.start + 0.08);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + n.start + n.dur);
-
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(now + n.start);
-        osc.stop(now + n.start + n.dur + 0.05);
-
-        if (n.start + n.dur > maxEnd) maxEnd = n.start + n.dur;
-    });
-
-    setTimeout(() => {
-        if (activeSalatOscCtx === ctx) {
-            stopSalatReminderSound();
-            if (typeof onEnded === 'function') onEnded();
-        }
-    }, Math.ceil((maxEnd + 0.2) * 1000));
-}
-
-async function playSalatReminderSound(toggleMode = false) {
-    const isPlaying = Boolean(activeSalatAudio || activeSalatOscCtx);
-    stopSalatReminderSound();
-    if (toggleMode && isPlaying) return;
-
-    document.querySelectorAll('.btn-test-salat-sound').forEach((btn) => {
-        btn.innerText = 'Stop';
-    });
-
-    const cfg = getSalatSoundConfig();
-
-    if (cfg.type === 'custom') {
-        const blob = await getCustomSalatAudioBlob();
-        if (blob) {
-            const url = URL.createObjectURL(blob);
-            activeSalatAudioUrl = url;
-            const audio = new Audio(url);
-            activeSalatAudio = audio;
-            audio.onended = () => stopSalatReminderSound();
-            audio.onerror = () => {
-                stopSalatReminderSound();
-                playSynthesizedSalatTone('preset_adzan');
-            };
-            try {
-                await audio.play();
-                return;
-            } catch (e) {
-                stopSalatReminderSound();
-            }
-        }
-    }
-
-    if (cfg.type === 'default') {
-        playSynthesizedSalatTone('preset_gema');
-        return;
-    }
-
-    playSynthesizedSalatTone(cfg.type === 'preset_gema' ? 'preset_gema' : 'preset_adzan');
-}
-
-window.playSalatReminderSound = playSalatReminderSound;
-window.stopSalatReminderSound = stopSalatReminderSound;
-
-function openSalatSoundModal() {
-    stopSalatReminderSound();
-    ensureSalatSoundModalExists();
-    renderSalatSoundOptions();
-    hideFabForModal();
-    document.getElementById('salat-sound-modal').style.display = 'flex';
-}
-
-function ensureSalatSoundModalExists() {
-    if (document.getElementById('salat-sound-modal')) return;
-    const modal = document.createElement('div');
-    modal.id = 'salat-sound-modal';
-    modal.className = 'modal-overlay';
-    modal.innerHTML = `
-        <div class="modal">
-            <h2>Suara Pengingat Salat</h2>
-            <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px; line-height:1.45;">
-                Pilih nada pengingat bawaan atau unggah file audio sendiri (adzan / murottal / nada lembut) untuk jadwal salat.
-            </p>
-            <div id="salat-sound-options-list"></div>
-            <input type="file" id="salat-custom-audio-input" accept="audio/*" style="display:none;" onchange="handleSalatAudioFileSelected(event)">
-            <div class="backup-btn-grid" style="margin-top:12px;">
-                <button type="button" class="backup-action-btn primary" onclick="document.getElementById('salat-custom-audio-input').click()">Upload File Audio</button>
-                <button type="button" class="backup-action-btn btn-test-salat-sound" onclick="playSalatReminderSound(true)">${iVol} Tes</button>
-            </div>
-            <small class="field-hint">Mendukung format .mp3, .m4a, .wav, dan .ogg (tersimpan otomatis untuk mode offline).</small>
-            <div class="modal-btns">
-                <button type="button" class="btn-save" onclick="stopSalatReminderSound(); closeModal('salat-sound-modal');">Selesai</button>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(modal);
-}
-
-async function renderSalatSoundOptions() {
-    const container = document.getElementById('salat-sound-options-list');
-    if (!container) return;
-
-    const current = getSalatSoundConfig();
-    const customBlob = await getCustomSalatAudioBlob();
-    const savedCustomName = localStorage.getItem('nalaSalatCustomFileName') || '';
-
-    const options = [
-        { type: 'preset_adzan', name: 'Nada Adzan Lembut', desc: 'Melodi instrumen bernuansa adzan (bawaan)' },
-        { type: 'preset_gema', name: 'Gema Masjid', desc: 'Dentang nada tenang 3 ketukan (bawaan)' },
-        { type: 'default', name: 'Default Sistem', desc: 'Mengikuti nada notifikasi standar perangkat' }
-    ];
-
-    if (customBlob && savedCustomName) {
-        options.unshift({
-            type: 'custom',
-            name: savedCustomName,
-            desc: 'File audio kustom pilihanmu'
-        });
-    }
-
-    container.innerHTML = options.map((opt) => {
-        const isSelected = current.type === opt.type && current.name === opt.name;
-        const safeName = opt.name.replace(/'/g, "\\'");
-        return `
-            <div class="sound-option-card ${isSelected ? 'selected' : ''}" onclick="selectSalatSoundOption('${opt.type}', '${safeName}')">
-                <div>
-                    <div class="sound-option-title">${opt.name}</div>
-                    <div class="sound-option-sub">${opt.desc}</div>
-                </div>
-                <strong style="font-size:11px; color:${isSelected ? 'var(--btn-primary)' : 'var(--text-muted)'};">
-                    ${isSelected ? 'Aktif' : 'Pilih'}
-                </strong>
-            </div>
-        `;
-    }).join('');
-}
-
-function selectSalatSoundOption(type, name) {
-    saveSalatSoundConfig({ type, name });
-    renderSalatSoundOptions();
-}
-
-async function handleSalatAudioFileSelected(event) {
-    const file = event.target.files && event.target.files[0];
-    if (!file) return;
-
-    if (file.size > 15 * 1024 * 1024) {
-        await polaAlert('Ukuran file audio terlalu besar (maksimal 15 MB).');
-        return;
-    }
-
-    try {
-        await storeCustomSalatAudioBlob(file);
-        localStorage.setItem('nalaSalatCustomFileName', file.name);
-        saveSalatSoundConfig({ type: 'custom', name: file.name });
-        await renderSalatSoundOptions();
-        await playSalatReminderSound(false);
-    } catch (e) {
-        await polaAlert('Gagal menyimpan file audio ke penyimpanan aplikasi.');
-    }
-}
 
 // --- PEMBERSIH CACHE LAMA OTOMATIS ---
 function cleanupOldCache() {
@@ -806,7 +521,6 @@ function buildBackupObject() {
     const libur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
     const dismissed = JSON.parse(localStorage.getItem('nalaDismissed')) || [];
     const userLocation = JSON.parse(localStorage.getItem('nalaUserLocation')) || null;
-    const salatSoundConfig = getSalatSoundConfig();
 
     return {
         app: 'Pola.',
@@ -829,8 +543,7 @@ function buildBackupObject() {
             nalaRoutines: routines,
             nalaLibur: libur,
             nalaDismissed: dismissed,
-            nalaUserLocation: userLocation,
-            nalaSalatSoundConfig: salatSoundConfig
+            nalaUserLocation: userLocation
         }
     };
 }
@@ -965,9 +678,6 @@ function validateAndNormalizeBackup(rawInput) {
     const userLocation = (src.nalaUserLocation && typeof src.nalaUserLocation.lat === 'number' && typeof src.nalaUserLocation.lng === 'number')
         ? src.nalaUserLocation
         : null;
-    const salatSoundConfig = (src.nalaSalatSoundConfig && src.nalaSalatSoundConfig.type)
-        ? src.nalaSalatSoundConfig
-        : null;
 
     return {
         ok: true,
@@ -980,8 +690,7 @@ function validateAndNormalizeBackup(rawInput) {
             nalaRoutines: routines,
             nalaLibur: libur,
             nalaDismissed: dismissed,
-            nalaUserLocation: userLocation,
-            nalaSalatSoundConfig: salatSoundConfig
+            nalaUserLocation: userLocation
         }
     };
 }
@@ -1185,9 +894,6 @@ async function executeBackupImport() {
         if (incoming.nalaUserLocation) {
             localStorage.setItem('nalaUserLocation', JSON.stringify(incoming.nalaUserLocation));
         }
-        if (incoming.nalaSalatSoundConfig) {
-            localStorage.setItem('nalaSalatSoundConfig', JSON.stringify(incoming.nalaSalatSoundConfig));
-        }
     } else {
         const curSem = ensureSemesterInitialized().semesters;
         const semIdMap = {};
@@ -1340,11 +1046,9 @@ function closeSideDrawer() {
     finalizeDrawerBlur(false);
     const insertModal = document.getElementById('insert-modal');
     const backupModal = document.getElementById('backup-modal');
-    const soundModal = document.getElementById('salat-sound-modal');
     if (
         (!insertModal || insertModal.style.display !== 'flex') &&
-        (!backupModal || backupModal.style.display !== 'flex') &&
-        (!soundModal || soundModal.style.display !== 'flex')
+        (!backupModal || backupModal.style.display !== 'flex')
     ) {
         showFabAfterModal();
     }
@@ -1572,11 +1276,9 @@ function initSideDrawerGestures() {
         if (e.touches.length !== 1) return;
         const insertModal = document.getElementById('insert-modal');
         const backupModal = document.getElementById('backup-modal');
-        const soundModal = document.getElementById('salat-sound-modal');
         if (
             (insertModal && insertModal.style.display === 'flex') ||
-            (backupModal && backupModal.style.display === 'flex') ||
-            (soundModal && soundModal.style.display === 'flex')
+            (backupModal && backupModal.style.display === 'flex')
         ) return;
 
         startX = e.touches[0].clientX;
@@ -1591,11 +1293,9 @@ function initSideDrawerGestures() {
         if (e.touches.length !== 1) return;
         const insertModal = document.getElementById('insert-modal');
         const backupModal = document.getElementById('backup-modal');
-        const soundModal = document.getElementById('salat-sound-modal');
         if (
             (insertModal && insertModal.style.display === 'flex') ||
-            (backupModal && backupModal.style.display === 'flex') ||
-            (soundModal && soundModal.style.display === 'flex')
+            (backupModal && backupModal.style.display === 'flex')
         ) return;
 
         currentX = e.touches[0].clientX;
@@ -2059,10 +1759,9 @@ function initRoutineSelectAll() {
 }
 
 function closeModal(id) {
-    if (id === 'salat-sound-modal') stopSalatReminderSound();
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
-    if (id !== 'semester-form-modal' && id !== 'backup-modal' && id !== 'salat-sound-modal') editId = null;
+    if (id !== 'semester-form-modal' && id !== 'backup-modal') editId = null;
     showFabAfterModal();
 }
 
@@ -2194,8 +1893,6 @@ async function loadTodaySchedule() {
 
     combinedSchedule.sort((a, b) => a.time.localeCompare(b.time));
     list.innerHTML = combinedSchedule.length ? '' : '<p style="text-align:center; color:var(--text-muted);">Semua jadwal hari ini sudah beres!</p>';
-    
-    const currentSound = getSalatSoundConfig();
 
     combinedSchedule.forEach(item => {
         let completed = (item.type === 'tugas' || item.type === 'acara') ? (item.status === 'done') : isDismissed(item.type, item.id, todayStr);
@@ -2222,19 +1919,7 @@ async function loadTodaySchedule() {
                 <div><button class="icon-btn" onclick="event.stopPropagation(); openEditRoutine(${item.id})">${iEdt} Edit</button></div>
             </div>`;
         } else {
-            detailHtml = `
-                <p>${item.desc}</p>
-                <div class="salat-sound-bar">
-                    <div class="salat-sound-info">
-                        <span>Suara Pengingat</span>
-                        <strong class="salat-sound-label-text">${currentSound.name}</strong>
-                    </div>
-                    <div class="salat-sound-btns">
-                        <button type="button" class="icon-btn btn-test-salat-sound" onclick="event.stopPropagation(); playSalatReminderSound(true)">${iVol} Tes</button>
-                        <button type="button" class="icon-btn" onclick="event.stopPropagation(); openSalatSoundModal()">${iEdt} Suara</button>
-                    </div>
-                </div>
-            `;
+            detailHtml = `<p>${item.desc}</p>`;
         }
 
         let badgeHtml = item.badge ? `<span class="tag-pill" style="${titleStyle}">${item.badge}</span>` : '';
@@ -2914,7 +2599,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- FITUR TUTUP MODAL DENGAN KLIK DI LUAR ---
     window.addEventListener('click', function(e) {
-        const dismissibleModals = ['day-detail-modal', 'backup-modal', 'salat-sound-modal']; 
+        const dismissibleModals = ['day-detail-modal', 'backup-modal']; 
         
         dismissibleModals.forEach(modalId => {
             const overlay = document.getElementById(modalId);

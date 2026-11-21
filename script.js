@@ -20,6 +20,25 @@ const iRom = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${st
 const iPls = `<svg viewBox="0 0 24 24" width="28" height="28" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
 const iDel = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${strk}" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
 
+function getFabContainer() {
+    const fab = document.querySelector('.fab');
+    return document.querySelector('.fab-container') || fab;
+}
+
+function hideFabForModal() {
+    closeFabMenu();
+    const target = getFabContainer();
+    if (target) target.classList.add('fab-modal-hidden');
+}
+
+function showFabAfterModal() {
+    const target = getFabContainer();
+    if (target) {
+        target.classList.remove('fab-modal-hidden');
+        target.classList.remove('fab-scroll-hidden');
+    }
+}
+
 function getOrCreateFabBackdrop() {
     let backdrop = document.getElementById('fab-backdrop');
     const fabContainer = document.querySelector('.fab-container');
@@ -53,6 +72,72 @@ function closeFabMenu() {
     if (backdrop) backdrop.classList.remove('show');
 }
 
+function initFabScrollBehavior() {
+    let lastScrollY = window.scrollY || 0;
+    window.addEventListener('scroll', () => {
+        const currentScrollY = window.scrollY || 0;
+        const target = getFabContainer();
+        const menu = document.getElementById('fab-menu');
+        if (!target) return;
+
+        // Jangan sembunyikan saat menu cabang sedang terbuka atau modal sedang aktif
+        if ((menu && menu.classList.contains('show')) || target.classList.contains('fab-modal-hidden')) {
+            lastScrollY = currentScrollY;
+            return;
+        }
+
+        const diff = currentScrollY - lastScrollY;
+        if (diff > 6 && currentScrollY > 40) {
+            target.classList.add('fab-scroll-hidden');
+        } else if (diff < -6 || currentScrollY <= 20) {
+            target.classList.remove('fab-scroll-hidden');
+        }
+        lastScrollY = currentScrollY;
+    }, { passive: true });
+}
+
+function ensureReminderFieldsInjected() {
+    // 1. Suntikkan ke #insert-form (untuk kalender.html jika belum ada)
+    const insertForm = document.getElementById('insert-form');
+    if (insertForm && !document.getElementById('field-reminder')) {
+        const div = document.createElement('div');
+        div.id = 'field-reminder';
+        div.innerHTML = `
+            <label>Pengingat Tambahan (Opsional)</label>
+            <div class="reminder-row">
+                <input type="number" id="custom-remind-val" min="1" placeholder="Contoh: 30">
+                <select id="custom-remind-unit">
+                    <option value="minutes">Menit sebelum</option>
+                    <option value="hours">Jam sebelum</option>
+                </select>
+            </div>
+            <small class="field-hint">Alarm 5 menit sebelum & tepat waktu tetap aktif otomatis.</small>
+        `;
+        const descField = document.getElementById('field-desc');
+        if (descField) insertForm.insertBefore(div, descField);
+        else insertForm.appendChild(div);
+    }
+
+    // 2. Suntikkan ke #matkul-form (untuk halaman Kuliah / matkul.html)
+    const matkulForm = document.getElementById('matkul-form');
+    if (matkulForm && !document.getElementById('field-matkul-reminder')) {
+        const div = document.createElement('div');
+        div.id = 'field-matkul-reminder';
+        div.innerHTML = `
+            <label>Pengingat Tambahan (Opsional)</label>
+            <div class="reminder-row">
+                <input type="number" id="m-remind-val" min="1" placeholder="Contoh: 30">
+                <select id="m-remind-unit">
+                    <option value="minutes">Menit sebelum</option>
+                    <option value="hours">Jam sebelum</option>
+                </select>
+            </div>
+            <small class="field-hint">Alarm 5 menit sebelum & tepat waktu tetap aktif otomatis.</small>
+        `;
+        matkulForm.appendChild(div);
+    }
+}
+
 function syncRoutineSelectAllState() {
     const allCb = document.getElementById('routine-days-all');
     const dayCbs = Array.from(document.querySelectorAll('input[name="routine-days"]'));
@@ -84,7 +169,13 @@ function initRoutineSelectAll() {
     });
 }
 
-function closeModal(id) { document.getElementById(id).style.display = 'none'; editId = null; }
+function closeModal(id) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+    editId = null;
+    showFabAfterModal();
+}
+
 function toggleDetail(element) { const detail = element.querySelector('.card-detail'); if(detail) detail.classList.toggle('show'); }
 function formatShortDate(dateStr) {
     if(!dateStr) return ''; const parts = dateStr.split('-');
@@ -173,7 +264,6 @@ async function loadTodaySchedule() {
         combinedSchedule.push({ type: 'kuliah', id: m.id, name: `${m.name}`, badge: 'Kuliah', time: m.isOverride ? m.newTime : m.jamMulai, endTime: eTime, color: 'var(--color-kuliah)', ruang: m.isOverride ? m.newRuangan : m.ruangan, dosen: m.isOverride ? m.newDosen : m.dosen });
     });
 
-    // Perubahan logika untuk Acara agar mengecek rentang hari
     savedTasks.forEach(t => {
         let isToday = (t.category === 'Acara') ? isDateInAcaraRange(todayStr, t) : (t.date === todayStr);
         if(isToday) {
@@ -542,7 +632,9 @@ function showDayDetails(dateStr, dayName) {
     
     let holidayText = isHoliday ? ` ${isHoliday}` : '';
     document.getElementById('detail-date-title').innerText = `${formatShortDate(dateStr)}${holidayText}`; 
-    document.getElementById('detail-list').innerHTML = listHtml; document.getElementById('day-detail-modal').style.display = 'flex';
+    document.getElementById('detail-list').innerHTML = listHtml;
+    hideFabForModal();
+    document.getElementById('day-detail-modal').style.display = 'flex';
 }
 
 function openRescheduleModal(matkulId, origDate, activeDate) {
@@ -552,6 +644,7 @@ function openRescheduleModal(matkulId, origDate, activeDate) {
     document.getElementById('res-date').value = existing ? existing.newDate : activeDate; document.getElementById('res-time').value = existing ? existing.newTime : original.jamMulai;
     if(document.getElementById('res-time-end')) document.getElementById('res-time-end').value = existing && existing.newEndTime !== undefined ? existing.newEndTime : original.jamSelesai;
     document.getElementById('res-ruang').value = existing ? existing.newRuangan : original.ruangan; document.getElementById('res-dosen').value = existing ? existing.newDosen : original.dosen;
+    hideFabForModal();
     document.getElementById('reschedule-modal').style.display = 'flex';
 }
 
@@ -564,8 +657,12 @@ function saveReschedule() {
 }
 
 function openModal(category) {
+    ensureReminderFieldsInjected();
     editId = null; document.getElementById('modal-title').innerText = `Tambah ${category}`; document.getElementById('insert-form').reset();
     syncRoutineSelectAllState();
+
+    if (document.getElementById('custom-remind-val')) document.getElementById('custom-remind-val').value = '';
+    if (document.getElementById('custom-remind-unit')) document.getElementById('custom-remind-unit').value = 'minutes';
     
     document.getElementById('field-nama-kegiatan').style.display = (category === 'Kuliah') ? 'none' : 'block';
     if(document.getElementById('field-matkul-dropdown')) document.getElementById('field-matkul-dropdown').style.display = (category === 'Tugas Kuliah' || category === 'Kuliah') ? 'block' : 'none';
@@ -586,6 +683,7 @@ function openModal(category) {
     }
     
     if(document.getElementById('field-jam')) document.getElementById('field-jam').style.display = (category === 'Libur') ? 'none' : 'block';
+    if(document.getElementById('field-reminder')) document.getElementById('field-reminder').style.display = (category === 'Libur') ? 'none' : 'block';
     
     if(document.getElementById('field-jam-selesai')) {
         document.getElementById('field-jam-selesai').style.display = (category === 'Kuliah' || category === 'Acara') ? 'block' : 'none';
@@ -604,8 +702,8 @@ function openModal(category) {
             if(!uniqueMatkul.includes(m.name)) { uniqueMatkul.push(m.name); sel.innerHTML += `<option value="${m.name}">${m.name}</option>`; }
         });
     }
+    hideFabForModal();
     document.getElementById('insert-modal').style.display = 'flex';
-    closeFabMenu();
 }
 
 function openEditTask(id, category) {
@@ -614,6 +712,8 @@ function openEditTask(id, category) {
     if(task) {
         document.getElementById('new-task-name').value = task.name; document.getElementById('new-task-date').value = task.date;
         document.getElementById('new-task-time').value = task.time; document.getElementById('new-task-desc').value = task.deskripsi || '';
+        if (document.getElementById('custom-remind-val')) document.getElementById('custom-remind-val').value = task.remindVal || '';
+        if (document.getElementById('custom-remind-unit')) document.getElementById('custom-remind-unit').value = task.remindUnit || 'minutes';
         
         if(category === 'Acara') {
             if(document.getElementById('new-task-date-end')) document.getElementById('new-task-date-end').value = task.endDate || '';
@@ -632,6 +732,8 @@ function openEditRoutine(id) {
     if(routine) {
         document.getElementById('new-task-name').value = routine.name; document.getElementById('new-task-time').value = routine.time;
         if(document.getElementById('new-task-desc')) document.getElementById('new-task-desc').value = routine.desc || '';
+        if (document.getElementById('custom-remind-val')) document.getElementById('custom-remind-val').value = routine.remindVal || '';
+        if (document.getElementById('custom-remind-unit')) document.getElementById('custom-remind-unit').value = routine.remindUnit || 'minutes';
         if(document.getElementById('new-task-color')) updateSwatchSelection(routine.color);
         document.querySelectorAll('input[name="routine-days"]').forEach(cb => { cb.checked = routine.days.includes(cb.value); });
         syncRoutineSelectAllState();
@@ -648,8 +750,19 @@ function openEditLibur(id) {
     }
 }
 
+function readCustomReminderFromInsert() {
+    const valEl = document.getElementById('custom-remind-val');
+    const unitEl = document.getElementById('custom-remind-unit');
+    const rawVal = valEl ? parseInt(valEl.value, 10) : NaN;
+    if (!isNaN(rawVal) && rawVal > 0) {
+        return { remindVal: rawVal, remindUnit: unitEl ? unitEl.value : 'minutes' };
+    }
+    return { remindVal: null, remindUnit: 'minutes' };
+}
+
 function saveNewTask() {
     const category = document.getElementById('current-category').value; const name = document.getElementById('new-task-name').value;
+    const reminderData = readCustomReminderFromInsert();
     
     if(category === 'Libur') {
         const date = document.getElementById('new-task-date').value; const endDateInput = document.getElementById('new-task-date-end'); const endDate = (endDateInput && endDateInput.value) ? endDateInput.value : date;
@@ -664,7 +777,7 @@ function saveNewTask() {
         const descInput = document.getElementById('new-task-desc'); const desc = descInput ? descInput.value : '';
         let selectedDays = []; document.querySelectorAll('input[name="routine-days"]:checked').forEach(cb => selectedDays.push(cb.value));
         if(!name || !time || selectedDays.length === 0) return alert("Nama, jam, dan hari wajib diisi!");
-        let routineData = { id: editId ? editId : Date.now(), name: name, time: time, days: selectedDays, color: document.getElementById('new-task-color').value, desc: desc };
+        let routineData = { id: editId ? editId : Date.now(), name: name, time: time, days: selectedDays, color: document.getElementById('new-task-color').value, desc: desc, ...reminderData };
         let savedRoutines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
         if(editId) { const idx = savedRoutines.findIndex(r => r.id == editId); if(idx !== -1) savedRoutines[idx] = routineData; } else { savedRoutines.push(routineData); }
         localStorage.setItem('nalaRoutines', JSON.stringify(savedRoutines));
@@ -679,14 +792,14 @@ function saveNewTask() {
         if(!orig) return alert("Data kuliah tidak ditemukan!");
 
         let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
-        overrides.push({ matkulId: orig.id, originalDate: 'EXTRA_'+Date.now(), newDate: date, newTime: time, newEndTime: endTime, newRuangan: ruang || orig.ruangan, newDosen: orig.dosen });
+        overrides.push({ matkulId: orig.id, originalDate: 'EXTRA_'+Date.now(), newDate: date, newTime: time, newEndTime: endTime, newRuangan: ruang || orig.ruangan, newDosen: orig.dosen, ...reminderData });
         localStorage.setItem('nalaOverrides', JSON.stringify(overrides));
     }
     else {
         const time = document.getElementById('new-task-time').value; const date = document.getElementById('new-task-date').value; 
         if(!name || !date || !time) return alert("Semua wajib diisi!"); 
         
-        let taskData = { id: editId ? editId : Date.now(), name: name, date: date, time: time, category: category, status: 'pending', deskripsi: document.getElementById('new-task-desc').value };
+        let taskData = { id: editId ? editId : Date.now(), name: name, date: date, time: time, category: category, status: 'pending', deskripsi: document.getElementById('new-task-desc').value, ...reminderData };
         
         if(category === 'Tugas Kuliah') { 
             taskData.color = 'var(--color-tugas)'; 
@@ -717,15 +830,32 @@ function saveNewTask() {
 
 // --- MATKUL ---
 if(document.getElementById('matkul-list')) renderMatkulList();
-function openMatkulModal() { editId = null; document.getElementById('matkul-form').reset(); document.getElementById('matkul-modal').style.display = 'flex'; }
+function openMatkulModal() {
+    ensureReminderFieldsInjected();
+    editId = null;
+    document.getElementById('matkul-form').reset();
+    if (document.getElementById('m-remind-val')) document.getElementById('m-remind-val').value = '';
+    if (document.getElementById('m-remind-unit')) document.getElementById('m-remind-unit').value = 'minutes';
+    hideFabForModal();
+    document.getElementById('matkul-modal').style.display = 'flex';
+}
 
 function saveMatkul() {
     const name = document.getElementById('m-name').value; const hari = document.getElementById('m-hari').value; const jamM = document.getElementById('m-jamMulai').value;
     if(!name || !hari || !jamM) return alert("Semua wajib diisi!");
+
+    const mRemindValEl = document.getElementById('m-remind-val');
+    const mRemindUnitEl = document.getElementById('m-remind-unit');
+    const parsedMRemind = mRemindValEl ? parseInt(mRemindValEl.value, 10) : NaN;
+    const remindVal = (!isNaN(parsedMRemind) && parsedMRemind > 0) ? parsedMRemind : null;
+    const remindUnit = mRemindUnitEl ? mRemindUnitEl.value : 'minutes';
+
     let savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
-    let matkulData = { id: editId ? editId : Date.now(), name: name, hari: hari, jamMulai: jamM, jamSelesai: document.getElementById('m-jamSelesai').value, dosen: document.getElementById('m-dosen').value, ruangan: document.getElementById('m-ruangan').value };
+    let matkulData = { id: editId ? editId : Date.now(), name: name, hari: hari, jamMulai: jamM, jamSelesai: document.getElementById('m-jamSelesai').value, dosen: document.getElementById('m-dosen').value, ruangan: document.getElementById('m-ruangan').value, remindVal: remindVal, remindUnit: remindUnit };
     if(editId) { const idx = savedMatkul.findIndex(m => m.id == editId); if(idx !== -1) savedMatkul[idx] = matkulData; } else { savedMatkul.push(matkulData); }
-    localStorage.setItem('nalaMatkul', JSON.stringify(savedMatkul)); closeModal('matkul-modal'); renderMatkulList();
+    localStorage.setItem('nalaMatkul', JSON.stringify(savedMatkul));
+    closeModal('matkul-modal');
+    refreshAllViews();
 }
 
 function renderMatkulList() {
@@ -771,20 +901,36 @@ function renderMatkulList() {
 }
 
 function editMatkul(id) {
+    ensureReminderFieldsInjected();
     let savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || []; let m = savedMatkul.find(x => x.id == id);
-    if(m) { editId = m.id; document.getElementById('m-name').value = m.name; document.getElementById('m-hari').value = m.hari; document.getElementById('m-jamMulai').value = m.jamMulai; document.getElementById('m-jamSelesai').value = m.jamSelesai; document.getElementById('m-dosen').value = m.dosen; document.getElementById('m-ruangan').value = m.ruangan; document.getElementById('matkul-modal').style.display = 'flex'; }
+    if(m) {
+        editId = m.id;
+        document.getElementById('m-name').value = m.name;
+        document.getElementById('m-hari').value = m.hari;
+        document.getElementById('m-jamMulai').value = m.jamMulai;
+        document.getElementById('m-jamSelesai').value = m.jamSelesai;
+        document.getElementById('m-dosen').value = m.dosen;
+        document.getElementById('m-ruangan').value = m.ruangan;
+        if (document.getElementById('m-remind-val')) document.getElementById('m-remind-val').value = m.remindVal || '';
+        if (document.getElementById('m-remind-unit')) document.getElementById('m-remind-unit').value = m.remindUnit || 'minutes';
+        hideFabForModal();
+        document.getElementById('matkul-modal').style.display = 'flex';
+    }
 }
 
 function deleteMatkul(id) {
     if(!confirm('Hapus jadwal kuliah ini?')) return;
     let savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || []; savedMatkul = savedMatkul.filter(m => m.id != id);
-    localStorage.setItem('nalaMatkul', JSON.stringify(savedMatkul)); renderMatkulList();
+    localStorage.setItem('nalaMatkul', JSON.stringify(savedMatkul));
+    refreshAllViews();
 }
 
 document.addEventListener("DOMContentLoaded", () => { 
     document.querySelectorAll('.fab').forEach(f => f.innerHTML = iPls);
     getOrCreateFabBackdrop();
     initRoutineSelectAll();
+    initFabScrollBehavior();
+    ensureReminderFieldsInjected();
 
     document.querySelectorAll('.swatch').forEach(sw => { 
         sw.addEventListener('click', function(e) { 

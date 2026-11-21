@@ -66,6 +66,18 @@
                     <div id="field-jam" style="width: 100%;"><label>Jam Mulai *</label><input type="time" id="new-task-time"></div>
                     <div id="field-jam-selesai" style="display:none; width: 100%;"><label>Jam Selesai</label><input type="time" id="new-task-time-end"></div>
                 </div>
+
+                <div id="field-reminder">
+                    <label>Pengingat Tambahan (Opsional)</label>
+                    <div class="reminder-row">
+                        <input type="number" id="custom-remind-val" min="1" placeholder="Contoh: 30">
+                        <select id="custom-remind-unit">
+                            <option value="minutes">Menit sebelum</option>
+                            <option value="hours">Jam sebelum</option>
+                        </select>
+                    </div>
+                    <small class="field-hint">Alarm 5 menit sebelum & tepat waktu tetap aktif otomatis.</small>
+                </div>
                 
                 <div id="field-desc"><label>Deskripsi (Opsional)</label><textarea id="new-task-desc" rows="2"></textarea></div>
                 

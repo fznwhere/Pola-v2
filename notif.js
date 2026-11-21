@@ -22,7 +22,6 @@ function getLocalNotificationsPlugin() {
 
 async function ensurePolaNotificationChannel(LocalNotifications) {
   try {
-    // Hapus channel versi lama agar tidak menumpuk di pengaturan aplikasi HP
     await LocalNotifications.deleteChannel({ id: 'pola_jadwal_v1' }).catch(() => {});
 
     await LocalNotifications.createChannel({
@@ -37,6 +36,18 @@ async function ensurePolaNotificationChannel(LocalNotifications) {
   } catch (e) {
     // Abaikan jika dijalankan di browser web biasa
   }
+}
+
+function getExtraReminderMinutes(item) {
+  if (!item || !item.remindVal) return 0;
+  const val = parseInt(item.remindVal, 10);
+  if (isNaN(val) || val <= 0) return 0;
+  return item.remindUnit === 'hours' ? val * 60 : val;
+}
+
+function formatReminderLabel(item) {
+  const val = parseInt(item.remindVal, 10);
+  return item.remindUnit === 'hours' ? `${val} Jam Lagi` : `${val} Menit Lagi`;
 }
 
 // Ambil jadwal salat per tanggal (dengan cache agar hemat kuota & jalan offline)
@@ -107,7 +118,9 @@ async function getSchedulesForDate(targetDateObj) {
         name: m.name,
         category: 'Kuliah',
         time: m.isOverride ? m.newTime : m.jamMulai,
-        extra: ruang ? `Ruang ${ruang}` : ''
+        extra: ruang ? `Ruang ${ruang}` : '',
+        remindVal: m.remindVal || null,
+        remindUnit: m.remindUnit || 'minutes'
       });
     }
   });
@@ -122,7 +135,9 @@ async function getSchedulesForDate(targetDateObj) {
         name: t.name,
         category: t.category,
         time: t.time,
-        extra: t.ruang || t.pengumpulan || ''
+        extra: t.ruang || t.pengumpulan || '',
+        remindVal: t.remindVal || null,
+        remindUnit: t.remindUnit || 'minutes'
       });
     }
   });
@@ -137,7 +152,9 @@ async function getSchedulesForDate(targetDateObj) {
           name: r.name,
           category: 'Rutinitas',
           time: r.time,
-          extra: r.desc || ''
+          extra: r.desc || '',
+          remindVal: r.remindVal || null,
+          remindUnit: r.remindUnit || 'minutes'
         });
       }
     });
@@ -151,12 +168,73 @@ async function getSchedulesForDate(targetDateObj) {
         name: `Salat ${s.name}`,
         category: 'Salat',
         time: s.time,
-        extra: 'Wilayah Yogyakarta'
+        extra: 'Wilayah Yogyakarta',
+        remindVal: null,
+        remindUnit: 'minutes'
       });
     }
   });
 
   return { dateStr, items };
+}
+
+function buildPendingTaskCountdownNotifications(now) {
+  const savedTasks = JSON.parse(localStorage.getItem('nalaTasks')) || [];
+  const pendingTasks = savedTasks.filter(
+    (t) => t.status !== 'done' && (t.category === 'Tugas Kuliah' || t.category === 'Tugas') && t.date
+  );
+
+  let results = [];
+  if (pendingTasks.length === 0) return results;
+
+  // Jadwalkan pengingat otomatis harian (pukul 08:00 pagi) untuk 8 hari ke depan (hari ini s/d +7)
+  for (let offset = 0; offset <= 7; offset++) {
+    const checkDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, 8, 0, 0, 0);
+    if (checkDate.getTime() <= Date.now()) continue;
+
+    const checkDayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
+    checkDayStart.setHours(0, 0, 0, 0);
+    const checkDateStr = `${checkDayStart.getFullYear()}-${String(checkDayStart.getMonth() + 1).padStart(2, '0')}-${String(checkDayStart.getDate()).padStart(2, '0')}`;
+
+    pendingTasks.forEach((t) => {
+      const parts = t.date.split('-').map(Number);
+      if (parts.length !== 3) return;
+      const deadlineDayStart = new Date(parts[0], parts[1] - 1, parts[2]);
+      deadlineDayStart.setHours(0, 0, 0, 0);
+
+      const diffDays = Math.round((deadlineDayStart - checkDayStart) / (1000 * 60 * 60 * 24));
+
+      // Aktif otomatis dari H-7 sampai Hari H (0)
+      if (diffDays >= 0 && diffDays <= 7) {
+        // Pada Hari H, hanya kirim pengingat pagi jika jam deadline >= 10:00 agar tidak bertumpuk dengan alarm pagi
+        if (diffDays === 0 && t.time) {
+          const [dHour] = t.time.split(':').map(Number);
+          if (!isNaN(dHour) && dHour < 10) return;
+        }
+
+        const label =
+          diffDays === 0
+            ? '🚨 Hari Ini Deadline'
+            : diffDays === 1
+            ? '⚠️ Besok Deadline'
+            : `📌 H-${diffDays} Deadline`;
+
+        const viaText = t.pengumpulan ? ` • Via ${t.pengumpulan}` : '';
+        results.push({
+          id: stringToInt32(`task_countdown_${t.id}_${checkDateStr}`),
+          title: `${label}: ${t.name}`,
+          body: `Batas kumpul ${formatShortDate(t.date)} pukul ${t.time || '-'}${viaText}`,
+          channelId: POLA_CHANNEL_ID,
+          sound: POLA_SOUND_NAME,
+          smallIcon: 'ic_stat_pola',
+          iconColor: '#C85A32',
+          schedule: { at: checkDate, allowWhileIdle: true }
+        });
+      }
+    });
+  }
+
+  return results;
 }
 
 async function syncAndroidAlarms() {
@@ -197,7 +275,25 @@ async function syncAndroidAlarms() {
       const pre5Date = new Date(exactDate.getTime() - 5 * 60 * 1000);
       const detail = item.extra ? ` (${item.extra})` : '';
 
-      // Alarm 1: 5 Menit Sebelum
+      // Alarm Opsional Pengguna (jika diatur & bukan 5 menit agar tidak ganda)
+      const extraMins = getExtraReminderMinutes(item);
+      if (extraMins > 0 && extraMins !== 5) {
+        const customDate = new Date(exactDate.getTime() - extraMins * 60 * 1000);
+        if (customDate.getTime() > Date.now()) {
+          notificationsToSchedule.push({
+            id: stringToInt32(`${dateStr}_${item.uid}_custom_${extraMins}`),
+            title: `⏰ ${formatReminderLabel(item)}: ${item.name}`,
+            body: `Mulai pukul ${item.time}${detail} • ${item.category}`,
+            channelId: POLA_CHANNEL_ID,
+            sound: POLA_SOUND_NAME,
+            smallIcon: 'ic_stat_pola',
+            iconColor: '#C85A32',
+            schedule: { at: customDate, allowWhileIdle: true }
+          });
+        }
+      }
+
+      // Alarm Wajib 1: 5 Menit Sebelum
       if (pre5Date.getTime() > Date.now()) {
         notificationsToSchedule.push({
           id: stringToInt32(`${dateStr}_${item.uid}_pre5`),
@@ -211,7 +307,7 @@ async function syncAndroidAlarms() {
         });
       }
 
-      // Alarm 2: Tepat Waktu
+      // Alarm Wajib 2: Tepat Waktu
       if (exactDate.getTime() > Date.now()) {
         notificationsToSchedule.push({
           id: stringToInt32(`${dateStr}_${item.uid}_now`),
@@ -226,6 +322,10 @@ async function syncAndroidAlarms() {
       }
     });
   }
+
+  // Tambahkan pengingat otomatis H-7 sampai Hari H untuk Tugas yang belum selesai
+  const taskCountdownNotifs = buildPendingTaskCountdownNotifications(now);
+  notificationsToSchedule.push(...taskCountdownNotifs);
 
   if (notificationsToSchedule.length > 0) {
     await LocalNotifications.schedule({ notifications: notificationsToSchedule });

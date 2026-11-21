@@ -62,14 +62,38 @@ const iPin = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${st
 const iRef = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${strk}" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>`;
 const iBkp = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="var(--btn-primary)" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`;
 
+// --- MIGRASI OTOMATIS DATA LAMA (nala* -> pola*) ---
+function migrateLegacyStorageKeys() {
+    const keyMap = [
+        ['nalaSemesters', 'polaSemesters'],
+        ['nalaActiveSemesterId', 'polaActiveSemesterId'],
+        ['nalaMatkul', 'polaMatkul'],
+        ['nalaOverrides', 'polaOverrides'],
+        ['nalaTasks', 'polaTasks'],
+        ['nalaRoutines', 'polaRoutines'],
+        ['nalaLibur', 'polaLibur'],
+        ['nalaDismissed', 'polaDismissed'],
+        ['nalaUserLocation', 'polaUserLocation']
+    ];
+    keyMap.forEach(([oldKey, newKey]) => {
+        const oldVal = localStorage.getItem(oldKey);
+        if (oldVal !== null) {
+            if (localStorage.getItem(newKey) === null) {
+                localStorage.setItem(newKey, oldVal);
+            }
+            localStorage.removeItem(oldKey);
+        }
+    });
+}
+
 // --- HELPER KETAHANAN KODE (SANITASI, TANGGAL LOKAL, FETCH TIMEOUT) ---
 function escapeHtml(str) {
     if (str === null || str === undefined) return '';
     return String(str)
-        .replace(/&/g, '&')
-        .replace(/</g, '<')
-        .replace(/>/g, '>')
-        .replace(/"/g, '"')
+        .replace(/&/g, '\x26amp;')
+        .replace(/</g, '\x26lt;')
+        .replace(/>/g, '\x26gt;')
+        .replace(/"/g, '\x26quot;')
         .replace(/'/g, '\x27');
 }
 
@@ -118,12 +142,13 @@ function cleanupOldCache() {
     const minYm = curYear * 12 + curMonth - 1;
 
     localStorage.removeItem('nalaSalatSound');
+    localStorage.removeItem('polaSalatSound');
 
     Object.keys(localStorage).forEach((key) => {
-        if (key.startsWith('nalaSalat_')) {
+        if (key.startsWith('nalaSalat_') || key.startsWith('polaSalat_') || key.startsWith('nalaSalatMonth_') || key.startsWith('nalaAutoLibur_')) {
             localStorage.removeItem(key);
         }
-        if (key.startsWith('nalaSalatMonth_')) {
+        if (key.startsWith('polaSalatMonth_')) {
             const parts = key.split('_');
             const y = parseInt(parts[1], 10);
             const m = parseInt(parts[2], 10);
@@ -131,7 +156,7 @@ function cleanupOldCache() {
                 localStorage.removeItem(key);
             }
         }
-        if (key.startsWith('nalaAutoLibur_')) {
+        if (key.startsWith('polaAutoLibur_')) {
             const y = parseInt(key.split('_')[1], 10);
             if (!isNaN(y) && y < curYear - 1) {
                 localStorage.removeItem(key);
@@ -141,7 +166,7 @@ function cleanupOldCache() {
 
     // Bersihkan riwayat centang (salat/rutinitas) yang lebih dari 7 hari lalu
     try {
-        const dismissed = JSON.parse(localStorage.getItem('nalaDismissed'));
+        const dismissed = JSON.parse(localStorage.getItem('polaDismissed'));
         if (Array.isArray(dismissed) && dismissed.length > 0) {
             const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
             const filtered = dismissed.filter((entry) => {
@@ -152,7 +177,7 @@ function cleanupOldCache() {
                 return (todayStart - entryDate) <= sevenDaysMs;
             });
             if (filtered.length !== dismissed.length) {
-                localStorage.setItem('nalaDismissed', JSON.stringify(filtered));
+                localStorage.setItem('polaDismissed', JSON.stringify(filtered));
             }
         }
     } catch (e) {}
@@ -221,7 +246,7 @@ function getAutoHolidaysMapForYear(year) {
         if (d.startsWith(prefix)) result[d] = defaultLiburNasional[d];
     });
     try {
-        const cached = JSON.parse(localStorage.getItem(`nalaAutoLibur_${year}`));
+        const cached = JSON.parse(localStorage.getItem(`polaAutoLibur_${year}`));
         if (cached && cached.holidays && typeof cached.holidays === 'object') {
             Object.assign(result, cached.holidays);
         }
@@ -238,7 +263,7 @@ function getAutoHolidayName(dateStr) {
 }
 
 function isUserHoliday(dateStr) {
-    let savedLibur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
+    let savedLibur = JSON.parse(localStorage.getItem('polaLibur')) || [];
     let tDate = parseLocalDate(dateStr);
     for (let l of savedLibur) {
         let sDate = parseLocalDate(l.startDate);
@@ -259,7 +284,7 @@ function getHolidayInfo(dateStr) {
 
 async function ensureAutoHolidaysForYear(year) {
     if (!year || fetchingHolidayYears.has(year)) return;
-    const cacheKey = `nalaAutoLibur_${year}`;
+    const cacheKey = `polaAutoLibur_${year}`;
     try {
         const cached = JSON.parse(localStorage.getItem(cacheKey));
         if (cached && cached.updatedAt && (Date.now() - cached.updatedAt) < 30 * 24 * 60 * 60 * 1000) {
@@ -341,7 +366,7 @@ async function ensureAutoHolidaysForYear(year) {
 // --- LOKASI USER & JADWAL SALAT OTOMATIS (BULANAN + OFFLINE) ---
 function getSavedCoordinates() {
     try {
-        const saved = JSON.parse(localStorage.getItem('nalaUserLocation'));
+        const saved = JSON.parse(localStorage.getItem('polaUserLocation'));
         if (saved && typeof saved.lat === 'number' && typeof saved.lng === 'number') {
             return saved;
         }
@@ -400,7 +425,6 @@ function refreshUserCoordinates(manual = false) {
             async (pos) => {
                 const lat = Number(pos.coords.latitude.toFixed(4));
                 const lng = Number(pos.coords.longitude.toFixed(4));
-                // Sensitif terhadap perpindahan > ~6,5 km (mis. Jogja -> Solo / Bali)
                 const movedFar =
                     current.isFallback ||
                     Math.abs(lat - current.lat) > 0.06 ||
@@ -419,12 +443,12 @@ function refreshUserCoordinates(manual = false) {
                     isFallback: false,
                     updatedAt: Date.now()
                 };
-                localStorage.setItem('nalaUserLocation', JSON.stringify(updated));
+                localStorage.setItem('polaUserLocation', JSON.stringify(updated));
                 updateLocationPillUI(null, false);
 
                 if (movedFar || manual) {
                     Object.keys(localStorage).forEach((k) => {
-                        if (k.startsWith('nalaSalatMonth_') || k.startsWith('nalaSalat_')) {
+                        if (k.startsWith('polaSalatMonth_') || k.startsWith('polaSalat_')) {
                             localStorage.removeItem(k);
                         }
                     });
@@ -438,7 +462,7 @@ function refreshUserCoordinates(manual = false) {
                     const resolved = await resolveCityName(current.lat, current.lng);
                     if (resolved) {
                         current.city = resolved;
-                        localStorage.setItem('nalaUserLocation', JSON.stringify(current));
+                        localStorage.setItem('polaUserLocation', JSON.stringify(current));
                     }
                 }
                 updateLocationPillUI(null, false);
@@ -461,7 +485,7 @@ function getCachedSalatTimingsSync(dateObj, dateStr) {
     const locKey = `${loc.lat.toFixed(2)}_${loc.lng.toFixed(2)}`;
     const yyyy = dateObj.getFullYear();
     const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
-    const monthCacheKey = `nalaSalatMonth_${yyyy}_${mm}_${locKey}`;
+    const monthCacheKey = `polaSalatMonth_${yyyy}_${mm}_${locKey}`;
     try {
         const cachedMonth = JSON.parse(localStorage.getItem(monthCacheKey));
         if (cachedMonth && Array.isArray(cachedMonth[dateStr]) && cachedMonth[dateStr].length === 5) {
@@ -480,7 +504,7 @@ async function fetchSalatTimingsForDate(dateObj, dateStr) {
     const yyyy = dateObj.getFullYear();
     const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
     const dd = String(dateObj.getDate()).padStart(2, '0');
-    const monthCacheKey = `nalaSalatMonth_${yyyy}_${mm}_${locKey}`;
+    const monthCacheKey = `polaSalatMonth_${yyyy}_${mm}_${locKey}`;
 
     try {
         const res = await fetchWithTimeout(
@@ -545,22 +569,22 @@ async function fetchSalatTimingsForDate(dateObj, dateStr) {
 
 // --- MANAJEMEN SEMESTER KULIAH ---
 function ensureSemesterInitialized() {
-    let semesters = JSON.parse(localStorage.getItem('nalaSemesters'));
-    let activeId = localStorage.getItem('nalaActiveSemesterId');
+    let semesters = JSON.parse(localStorage.getItem('polaSemesters'));
+    let activeId = localStorage.getItem('polaActiveSemesterId');
 
     if (!Array.isArray(semesters) || semesters.length === 0) {
         semesters = [{ id: 'sem_1', name: 'Semester 1', createdAt: Date.now() }];
         activeId = 'sem_1';
-        localStorage.setItem('nalaSemesters', JSON.stringify(semesters));
-        localStorage.setItem('nalaActiveSemesterId', activeId);
+        localStorage.setItem('polaSemesters', JSON.stringify(semesters));
+        localStorage.setItem('polaActiveSemesterId', activeId);
     }
 
     if (!activeId || !semesters.some((s) => s.id === activeId)) {
         activeId = semesters[0].id;
-        localStorage.setItem('nalaActiveSemesterId', activeId);
+        localStorage.setItem('polaActiveSemesterId', activeId);
     }
 
-    let savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
+    let savedMatkul = JSON.parse(localStorage.getItem('polaMatkul')) || [];
     let migrated = false;
     savedMatkul.forEach((m) => {
         if (!m.semesterId) {
@@ -569,7 +593,7 @@ function ensureSemesterInitialized() {
         }
     });
     if (migrated) {
-        localStorage.setItem('nalaMatkul', JSON.stringify(savedMatkul));
+        localStorage.setItem('polaMatkul', JSON.stringify(savedMatkul));
     }
 
     return { semesters, activeId };
@@ -586,25 +610,25 @@ function getActiveSemesterObj() {
 
 function getActiveMatkulList() {
     const activeId = getActiveSemesterId();
-    const savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
+    const savedMatkul = JSON.parse(localStorage.getItem('polaMatkul')) || [];
     return savedMatkul.filter((m) => m.semesterId === activeId);
 }
 
 function setActiveSemester(semId) {
-    localStorage.setItem('nalaActiveSemesterId', semId);
+    localStorage.setItem('polaActiveSemesterId', semId);
     refreshAllViews();
 }
 
 // --- EKSPOR & IMPOR JSON ANTI-GAGAL ---
 function buildBackupObject() {
     const { semesters, activeId } = ensureSemesterInitialized();
-    const matkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
-    const overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
-    const tasks = JSON.parse(localStorage.getItem('nalaTasks')) || [];
-    const routines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
-    const libur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
-    const dismissed = JSON.parse(localStorage.getItem('nalaDismissed')) || [];
-    const userLocation = JSON.parse(localStorage.getItem('nalaUserLocation')) || null;
+    const matkul = JSON.parse(localStorage.getItem('polaMatkul')) || [];
+    const overrides = JSON.parse(localStorage.getItem('polaOverrides')) || [];
+    const tasks = JSON.parse(localStorage.getItem('polaTasks')) || [];
+    const routines = JSON.parse(localStorage.getItem('polaRoutines')) || [];
+    const libur = JSON.parse(localStorage.getItem('polaLibur')) || [];
+    const dismissed = JSON.parse(localStorage.getItem('polaDismissed')) || [];
+    const userLocation = JSON.parse(localStorage.getItem('polaUserLocation')) || null;
 
     return {
         app: 'Pola.',
@@ -619,15 +643,15 @@ function buildBackupObject() {
             overrides: overrides.length
         },
         data: {
-            nalaSemesters: semesters,
-            nalaActiveSemesterId: activeId,
-            nalaMatkul: matkul,
-            nalaOverrides: overrides,
-            nalaTasks: tasks,
-            nalaRoutines: routines,
-            nalaLibur: libur,
-            nalaDismissed: dismissed,
-            nalaUserLocation: userLocation
+            polaSemesters: semesters,
+            polaActiveSemesterId: activeId,
+            polaMatkul: matkul,
+            polaOverrides: overrides,
+            polaTasks: tasks,
+            polaRoutines: routines,
+            polaLibur: libur,
+            polaDismissed: dismissed,
+            polaUserLocation: userLocation
         }
     };
 }
@@ -649,15 +673,23 @@ function validateAndNormalizeBackup(rawInput) {
     }
 
     const src = (parsed.data && typeof parsed.data === 'object') ? parsed.data : parsed;
-    const knownKeys = ['nalaSemesters', 'nalaMatkul', 'nalaOverrides', 'nalaTasks', 'nalaRoutines', 'nalaLibur', 'nalaDismissed'];
-    const hasKnownKey = knownKeys.some((k) => Array.isArray(src[k]));
+    const rawSemesters = src.polaSemesters || src.nalaSemesters;
+    const rawActiveSemId = src.polaActiveSemesterId || src.nalaActiveSemesterId;
+    const rawMatkul = src.polaMatkul || src.nalaMatkul;
+    const rawOverrides = src.polaOverrides || src.nalaOverrides;
+    const rawTasks = src.polaTasks || src.nalaTasks;
+    const rawRoutines = src.polaRoutines || src.nalaRoutines;
+    const rawLibur = src.polaLibur || src.nalaLibur;
+    const rawDismissed = src.polaDismissed || src.nalaDismissed;
+    const rawUserLocation = src.polaUserLocation || src.nalaUserLocation;
 
+    const hasKnownKey = [rawSemesters, rawMatkul, rawOverrides, rawTasks, rawRoutines, rawLibur, rawDismissed].some(Array.isArray);
     if (!hasKnownKey) {
         return { ok: false, error: 'File ini bukan cadangan data aplikasi Pola.' };
     }
 
-    let semesters = Array.isArray(src.nalaSemesters)
-        ? src.nalaSemesters
+    let semesters = Array.isArray(rawSemesters)
+        ? rawSemesters
             .filter((s) => s && typeof s === 'object' && s.name)
             .map((s, idx) => ({
                 id: String(s.id || `sem_${Date.now()}_${idx}`),
@@ -670,10 +702,10 @@ function validateAndNormalizeBackup(rawInput) {
         semesters = [{ id: 'sem_1', name: 'Semester 1', createdAt: Date.now() }];
     }
     const validSemIds = new Set(semesters.map((s) => s.id));
-    const defaultSemId = validSemIds.has(src.nalaActiveSemesterId) ? src.nalaActiveSemesterId : semesters[0].id;
+    const defaultSemId = validSemIds.has(rawActiveSemId) ? rawActiveSemId : semesters[0].id;
 
-    const matkul = Array.isArray(src.nalaMatkul)
-        ? src.nalaMatkul
+    const matkul = Array.isArray(rawMatkul)
+        ? rawMatkul
             .filter((m) => m && typeof m === 'object' && m.name && m.hari && m.jamMulai)
             .map((m, idx) => ({
                 id: m.id || (Date.now() + idx),
@@ -689,8 +721,8 @@ function validateAndNormalizeBackup(rawInput) {
             }))
         : [];
 
-    const tasks = Array.isArray(src.nalaTasks)
-        ? src.nalaTasks
+    const tasks = Array.isArray(rawTasks)
+        ? rawTasks
             .filter((t) => t && typeof t === 'object' && t.name && t.date && t.time)
             .map((t, idx) => {
                 const cat = t.category ? String(t.category) : 'Tugas';
@@ -716,8 +748,8 @@ function validateAndNormalizeBackup(rawInput) {
             })
         : [];
 
-    const routines = Array.isArray(src.nalaRoutines)
-        ? src.nalaRoutines
+    const routines = Array.isArray(rawRoutines)
+        ? rawRoutines
             .filter((r) => r && typeof r === 'object' && r.name && r.time && Array.isArray(r.days))
             .map((r, idx) => ({
                 id: r.id || (Date.now() + 2000 + idx),
@@ -731,8 +763,8 @@ function validateAndNormalizeBackup(rawInput) {
             }))
         : [];
 
-    const libur = Array.isArray(src.nalaLibur)
-        ? src.nalaLibur
+    const libur = Array.isArray(rawLibur)
+        ? rawLibur
             .filter((l) => l && typeof l === 'object' && l.name && l.startDate)
             .map((l, idx) => ({
                 id: l.id || (Date.now() + 3000 + idx),
@@ -742,8 +774,8 @@ function validateAndNormalizeBackup(rawInput) {
             }))
         : [];
 
-    const overrides = Array.isArray(src.nalaOverrides)
-        ? src.nalaOverrides
+    const overrides = Array.isArray(rawOverrides)
+        ? rawOverrides
             .filter((o) => o && typeof o === 'object' && o.matkulId && o.newDate && o.newTime)
             .map((o) => ({
                 matkulId: o.matkulId,
@@ -758,23 +790,23 @@ function validateAndNormalizeBackup(rawInput) {
             }))
         : [];
 
-    const dismissed = Array.isArray(src.nalaDismissed) ? src.nalaDismissed.map(String) : [];
-    const userLocation = (src.nalaUserLocation && typeof src.nalaUserLocation.lat === 'number' && typeof src.nalaUserLocation.lng === 'number')
-        ? src.nalaUserLocation
+    const dismissed = Array.isArray(rawDismissed) ? rawDismissed.map(String) : [];
+    const userLocation = (rawUserLocation && typeof rawUserLocation.lat === 'number' && typeof rawUserLocation.lng === 'number')
+        ? rawUserLocation
         : null;
 
     return {
         ok: true,
         normalized: {
-            nalaSemesters: semesters,
-            nalaActiveSemesterId: defaultSemId,
-            nalaMatkul: matkul,
-            nalaOverrides: overrides,
-            nalaTasks: tasks,
-            nalaRoutines: routines,
-            nalaLibur: libur,
-            nalaDismissed: dismissed,
-            nalaUserLocation: userLocation
+            polaSemesters: semesters,
+            polaActiveSemesterId: defaultSemId,
+            polaMatkul: matkul,
+            polaOverrides: overrides,
+            polaTasks: tasks,
+            polaRoutines: routines,
+            polaLibur: libur,
+            polaDismissed: dismissed,
+            polaUserLocation: userLocation
         }
     };
 }
@@ -948,7 +980,7 @@ async function showBackupValidationPreview(rawText) {
     const d = res.normalized;
     const summaryEl = document.getElementById('backup-preview-summary');
     if (summaryEl) {
-        summaryEl.innerHTML = `Cadangan valid ditemukan:<br>${d.nalaSemesters.length} Semester • ${d.nalaMatkul.length} Matkul • ${d.nalaTasks.length} Tugas/Acara • ${d.nalaRoutines.length} Rutinitas • ${d.nalaLibur.length} Libur`;
+        summaryEl.innerHTML = `Cadangan valid ditemukan:<br>${d.polaSemesters.length} Semester • ${d.polaMatkul.length} Matkul • ${d.polaTasks.length} Tugas/Acara • ${d.polaRoutines.length} Rutinitas • ${d.polaLibur.length} Libur`;
     }
     if (previewBox) previewBox.style.display = 'block';
 }
@@ -967,21 +999,21 @@ async function executeBackupImport() {
         const ok = await polaConfirm('Seluruh data saat ini akan diganti dengan isi cadangan. Lanjutkan?', 'Timpa Data', 'Ya, Pulihkan');
         if (!ok) return;
 
-        localStorage.setItem('nalaSemesters', JSON.stringify(incoming.nalaSemesters));
-        localStorage.setItem('nalaActiveSemesterId', incoming.nalaActiveSemesterId);
-        localStorage.setItem('nalaMatkul', JSON.stringify(incoming.nalaMatkul));
-        localStorage.setItem('nalaOverrides', JSON.stringify(incoming.nalaOverrides));
-        localStorage.setItem('nalaTasks', JSON.stringify(incoming.nalaTasks));
-        localStorage.setItem('nalaRoutines', JSON.stringify(incoming.nalaRoutines));
-        localStorage.setItem('nalaLibur', JSON.stringify(incoming.nalaLibur));
-        localStorage.setItem('nalaDismissed', JSON.stringify(incoming.nalaDismissed));
-        if (incoming.nalaUserLocation) {
-            localStorage.setItem('nalaUserLocation', JSON.stringify(incoming.nalaUserLocation));
+        localStorage.setItem('polaSemesters', JSON.stringify(incoming.polaSemesters));
+        localStorage.setItem('polaActiveSemesterId', incoming.polaActiveSemesterId);
+        localStorage.setItem('polaMatkul', JSON.stringify(incoming.polaMatkul));
+        localStorage.setItem('polaOverrides', JSON.stringify(incoming.polaOverrides));
+        localStorage.setItem('polaTasks', JSON.stringify(incoming.polaTasks));
+        localStorage.setItem('polaRoutines', JSON.stringify(incoming.polaRoutines));
+        localStorage.setItem('polaLibur', JSON.stringify(incoming.polaLibur));
+        localStorage.setItem('polaDismissed', JSON.stringify(incoming.polaDismissed));
+        if (incoming.polaUserLocation) {
+            localStorage.setItem('polaUserLocation', JSON.stringify(incoming.polaUserLocation));
         }
     } else {
         const curSem = ensureSemesterInitialized().semesters;
         const semIdMap = {};
-        incoming.nalaSemesters.forEach((s, idx) => {
+        incoming.polaSemesters.forEach((s, idx) => {
             const sameName = curSem.find((cs) => cs.name.trim().toLowerCase() === s.name.trim().toLowerCase());
             if (sameName) {
                 semIdMap[s.id] = sameName.id;
@@ -991,7 +1023,7 @@ async function executeBackupImport() {
                 curSem.push({ ...s, id: newSemId });
             }
         });
-        localStorage.setItem('nalaSemesters', JSON.stringify(curSem));
+        localStorage.setItem('polaSemesters', JSON.stringify(curSem));
 
         const mergeById = (existingArr, incomingArr, mapper = (x) => x) => {
             const seen = new Set(existingArr.map((item) => String(item.id)));
@@ -1010,27 +1042,27 @@ async function executeBackupImport() {
             return merged;
         };
 
-        const curMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
-        const mergedMatkul = mergeById(curMatkul, incoming.nalaMatkul, (m) => ({
+        const curMatkul = JSON.parse(localStorage.getItem('polaMatkul')) || [];
+        const mergedMatkul = mergeById(curMatkul, incoming.polaMatkul, (m) => ({
             ...m,
             semesterId: semIdMap[m.semesterId] || getActiveSemesterId()
         }));
-        localStorage.setItem('nalaMatkul', JSON.stringify(mergedMatkul));
+        localStorage.setItem('polaMatkul', JSON.stringify(mergedMatkul));
 
-        const curTasks = JSON.parse(localStorage.getItem('nalaTasks')) || [];
-        localStorage.setItem('nalaTasks', JSON.stringify(mergeById(curTasks, incoming.nalaTasks)));
+        const curTasks = JSON.parse(localStorage.getItem('polaTasks')) || [];
+        localStorage.setItem('polaTasks', JSON.stringify(mergeById(curTasks, incoming.polaTasks)));
 
-        const curRoutines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
-        localStorage.setItem('nalaRoutines', JSON.stringify(mergeById(curRoutines, incoming.nalaRoutines)));
+        const curRoutines = JSON.parse(localStorage.getItem('polaRoutines')) || [];
+        localStorage.setItem('polaRoutines', JSON.stringify(mergeById(curRoutines, incoming.polaRoutines)));
 
-        const curLibur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
-        localStorage.setItem('nalaLibur', JSON.stringify(mergeById(curLibur, incoming.nalaLibur)));
+        const curLibur = JSON.parse(localStorage.getItem('polaLibur')) || [];
+        localStorage.setItem('polaLibur', JSON.stringify(mergeById(curLibur, incoming.polaLibur)));
 
-        const curOverrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
-        localStorage.setItem('nalaOverrides', JSON.stringify([...curOverrides, ...incoming.nalaOverrides]));
+        const curOverrides = JSON.parse(localStorage.getItem('polaOverrides')) || [];
+        localStorage.setItem('polaOverrides', JSON.stringify([...curOverrides, ...incoming.polaOverrides]));
 
-        const curDismissed = JSON.parse(localStorage.getItem('nalaDismissed')) || [];
-        localStorage.setItem('nalaDismissed', JSON.stringify([...new Set([...curDismissed, ...incoming.nalaDismissed])]));
+        const curDismissed = JSON.parse(localStorage.getItem('polaDismissed')) || [];
+        localStorage.setItem('polaDismissed', JSON.stringify([...new Set([...curDismissed, ...incoming.polaDismissed])]));
     }
 
     pendingBackupPayload = null;
@@ -1164,9 +1196,9 @@ function switchDrawerTab(tabName) {
 }
 
 function updateDrawerOptionCounts() {
-    const routines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
-    const acaras = (JSON.parse(localStorage.getItem('nalaTasks')) || []).filter((t) => t.category === 'Acara');
-    const libur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
+    const routines = JSON.parse(localStorage.getItem('polaRoutines')) || [];
+    const acaras = (JSON.parse(localStorage.getItem('polaTasks')) || []).filter((t) => t.category === 'Acara');
+    const libur = JSON.parse(localStorage.getItem('polaLibur')) || [];
 
     if (document.getElementById('dcount-rutinitas')) document.getElementById('dcount-rutinitas').innerText = routines.length;
     if (document.getElementById('dcount-acara')) document.getElementById('dcount-acara').innerText = acaras.length;
@@ -1186,7 +1218,7 @@ function renderSideDrawerContent() {
 
     if (currentDrawerTab === 'Rutinitas') {
         if (labelEl) labelEl.innerText = 'Rutinitas';
-        const routines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
+        const routines = JSON.parse(localStorage.getItem('polaRoutines')) || [];
         if (routines.length === 0) {
             container.innerHTML = '<div class="drawer-empty-state"><p>Belum ada rutinitas.</p></div>';
             return;
@@ -1218,7 +1250,7 @@ function renderSideDrawerContent() {
         container.innerHTML = html;
     } else if (currentDrawerTab === 'Acara') {
         if (labelEl) labelEl.innerText = 'Acara';
-        const tasks = JSON.parse(localStorage.getItem('nalaTasks')) || [];
+        const tasks = JSON.parse(localStorage.getItem('polaTasks')) || [];
         const acaras = tasks.filter((t) => t.category === 'Acara');
 
         if (acaras.length === 0) {
@@ -1284,7 +1316,7 @@ function renderSideDrawerContent() {
         container.innerHTML = html;
     } else if (currentDrawerTab === 'Libur') {
         if (labelEl) labelEl.innerText = 'Hari Libur';
-        const libur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
+        const libur = JSON.parse(localStorage.getItem('polaLibur')) || [];
 
         if (libur.length === 0) {
             container.innerHTML = '<div class="drawer-empty-state"><p>Belum ada jadwal hari libur pribadi.</p></div>';
@@ -1530,7 +1562,7 @@ function renderSemesterDrawerList() {
     if (!container) return;
 
     const { semesters, activeId } = ensureSemesterInitialized();
-    const allMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
+    const allMatkul = JSON.parse(localStorage.getItem('polaMatkul')) || [];
 
     let html = '';
     semesters.forEach((sem) => {
@@ -1596,23 +1628,23 @@ async function saveSemesterForm() {
     if (editSemesterId) {
         const idx = semesters.findIndex((s) => s.id === editSemesterId);
         if (idx !== -1) semesters[idx].name = name;
-        localStorage.setItem('nalaSemesters', JSON.stringify(semesters));
+        localStorage.setItem('polaSemesters', JSON.stringify(semesters));
     } else {
         const newId = 'sem_' + Date.now();
         semesters.push({ id: newId, name, createdAt: Date.now() });
-        localStorage.setItem('nalaSemesters', JSON.stringify(semesters));
+        localStorage.setItem('polaSemesters', JSON.stringify(semesters));
 
         const copyMode = document.getElementById('sem-copy-select').value;
         if (copyMode === 'copy') {
-            const allMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
+            const allMatkul = JSON.parse(localStorage.getItem('polaMatkul')) || [];
             const activeCourses = allMatkul.filter((m) => m.semesterId === activeId);
             activeCourses.forEach((m, index) => {
                 allMatkul.push({ ...m, id: Date.now() + index + 1, semesterId: newId });
             });
-            localStorage.setItem('nalaMatkul', JSON.stringify(allMatkul));
+            localStorage.setItem('polaMatkul', JSON.stringify(allMatkul));
         }
 
-        localStorage.setItem('nalaActiveSemesterId', newId);
+        localStorage.setItem('polaActiveSemesterId', newId);
     }
 
     closeModal('semester-form-modal');
@@ -1631,24 +1663,23 @@ async function deleteSemesterItem(semId) {
     if (!ok) return;
 
     const remaining = semesters.filter((s) => s.id !== semId);
-    localStorage.setItem('nalaSemesters', JSON.stringify(remaining));
+    localStorage.setItem('polaSemesters', JSON.stringify(remaining));
 
-    let allMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
+    let allMatkul = JSON.parse(localStorage.getItem('polaMatkul')) || [];
     const deletedMatkulIds = new Set(
         allMatkul.filter((m) => m.semesterId === semId).map((m) => String(m.id))
     );
     allMatkul = allMatkul.filter((m) => m.semesterId !== semId);
-    localStorage.setItem('nalaMatkul', JSON.stringify(allMatkul));
+    localStorage.setItem('polaMatkul', JSON.stringify(allMatkul));
 
-    // Bersihkan jadwal pengganti/pindahan milik mata kuliah yang ikut terhapus
     if (deletedMatkulIds.size > 0) {
-        let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
+        let overrides = JSON.parse(localStorage.getItem('polaOverrides')) || [];
         overrides = overrides.filter((o) => !deletedMatkulIds.has(String(o.matkulId)));
-        localStorage.setItem('nalaOverrides', JSON.stringify(overrides));
+        localStorage.setItem('polaOverrides', JSON.stringify(overrides));
     }
 
     if (activeId === semId) {
-        localStorage.setItem('nalaActiveSemesterId', remaining[0].id);
+        localStorage.setItem('polaActiveSemesterId', remaining[0].id);
     }
 
     renderSemesterDrawerList();
@@ -1888,41 +1919,41 @@ function updateSwatchSelection(colorVal) {
 }
 
 function toggleTaskDone(id) {
-    let tasks = JSON.parse(localStorage.getItem('nalaTasks')) || []; let idx = tasks.findIndex(t => t.id == id);
-    if(idx !== -1) { tasks[idx].status = tasks[idx].status === 'done' ? 'pending' : 'done'; localStorage.setItem('nalaTasks', JSON.stringify(tasks)); refreshAllViews(); }
+    let tasks = JSON.parse(localStorage.getItem('polaTasks')) || []; let idx = tasks.findIndex(t => t.id == id);
+    if(idx !== -1) { tasks[idx].status = tasks[idx].status === 'done' ? 'pending' : 'done'; localStorage.setItem('polaTasks', JSON.stringify(tasks)); refreshAllViews(); }
 }
 function toggleDismiss(type, id, dateStr) {
     if(type === 'tugas' || type === 'acara') { toggleTaskDone(id); return; }
-    let dismissed = JSON.parse(localStorage.getItem('nalaDismissed')) || []; const key = `${type}_${id}_${dateStr}`;
+    let dismissed = JSON.parse(localStorage.getItem('polaDismissed')) || []; const key = `${type}_${id}_${dateStr}`;
     if(dismissed.includes(key)) dismissed = dismissed.filter(k => k !== key); else dismissed.push(key);
-    localStorage.setItem('nalaDismissed', JSON.stringify(dismissed)); refreshAllViews();
+    localStorage.setItem('polaDismissed', JSON.stringify(dismissed)); refreshAllViews();
 }
-function isDismissed(type, id, dateStr) { return (JSON.parse(localStorage.getItem('nalaDismissed')) || []).includes(`${type}_${id}_${dateStr}`); }
+function isDismissed(type, id, dateStr) { return (JSON.parse(localStorage.getItem('polaDismissed')) || []).includes(`${type}_${id}_${dateStr}`); }
 
 async function deleteTask(id) {
     const ok = await polaConfirm('Hapus jadwal ini dari daftar?', 'Hapus Jadwal', 'Hapus');
     if(!ok) return;
-    let tasks = JSON.parse(localStorage.getItem('nalaTasks')) || []; tasks = tasks.filter(t => t.id != id);
-    localStorage.setItem('nalaTasks', JSON.stringify(tasks)); refreshAllViews();
+    let tasks = JSON.parse(localStorage.getItem('polaTasks')) || []; tasks = tasks.filter(t => t.id != id);
+    localStorage.setItem('polaTasks', JSON.stringify(tasks)); refreshAllViews();
 }
 async function deleteRoutine(id) {
     const ok = await polaConfirm('Hapus rutinitas ini secara permanen?', 'Hapus Rutinitas', 'Hapus');
     if(!ok) return;
-    let routines = JSON.parse(localStorage.getItem('nalaRoutines')) || []; routines = routines.filter(r => r.id != id);
-    localStorage.setItem('nalaRoutines', JSON.stringify(routines)); refreshAllViews();
+    let routines = JSON.parse(localStorage.getItem('polaRoutines')) || []; routines = routines.filter(r => r.id != id);
+    localStorage.setItem('polaRoutines', JSON.stringify(routines)); refreshAllViews();
 }
 async function deleteLibur(id) {
     const ok = await polaConfirm('Hapus jadwal libur ini?', 'Hapus Libur', 'Hapus');
     if(!ok) return;
-    let libur = JSON.parse(localStorage.getItem('nalaLibur')) || []; libur = libur.filter(l => l.id != id);
-    localStorage.setItem('nalaLibur', JSON.stringify(libur)); refreshAllViews();
+    let libur = JSON.parse(localStorage.getItem('polaLibur')) || []; libur = libur.filter(l => l.id != id);
+    localStorage.setItem('polaLibur', JSON.stringify(libur)); refreshAllViews();
 }
 async function deleteOverride(matkulId, originalDate) {
     const ok = await polaConfirm('Hapus jadwal kuliah pengganti/pindahan ini?', 'Hapus Jadwal Kuliah', 'Hapus');
     if(!ok) return;
-    let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
+    let overrides = JSON.parse(localStorage.getItem('polaOverrides')) || [];
     overrides = overrides.filter(o => !(String(o.matkulId) === String(matkulId) && String(o.originalDate) === String(originalDate)));
-    localStorage.setItem('nalaOverrides', JSON.stringify(overrides));
+    localStorage.setItem('polaOverrides', JSON.stringify(overrides));
     const detailModal = document.getElementById('day-detail-modal');
     if (detailModal && detailModal.style.display === 'flex') {
         closeModal('day-detail-modal');
@@ -1959,6 +1990,7 @@ function setupBerandaUtilityBar() {
     updateLocationPillUI(null, false);
 }
 
+migrateLegacyStorageKeys();
 ensureSemesterInitialized();
 cleanupOldCache();
 
@@ -2042,9 +2074,9 @@ async function loadTodaySchedule() {
     let baseSchedule = [];
 
     let savedMatkul = getActiveMatkulList();
-    let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
-    let savedTasks = JSON.parse(localStorage.getItem('nalaTasks')) || [];
-    let savedRoutines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
+    let overrides = JSON.parse(localStorage.getItem('polaOverrides')) || [];
+    let savedTasks = JSON.parse(localStorage.getItem('polaTasks')) || [];
+    let savedRoutines = JSON.parse(localStorage.getItem('polaRoutines')) || [];
 
     let isHoliday = getHolidayInfo(todayStr);
     let todaysMatkul = savedMatkul.filter(m => m.hari === todayDayName);
@@ -2110,7 +2142,6 @@ async function loadTodaySchedule() {
         });
     });
 
-    // Cek cache salat lokal secara sinkron agar tampil instan (0 ms)
     const cachedSalat = getCachedSalatTimingsSync(today, todayStr);
     if (cachedSalat) {
         const fullSchedule = [
@@ -2122,7 +2153,6 @@ async function loadTodaySchedule() {
         return;
     }
 
-    // Jika belum ada di cache (mis. awal bulan atau baru pindah kota), render jadwal lokal dulu tanpa menunggu internet
     if (baseSchedule.length > 0) {
         const sortedLocal = [...baseSchedule].sort((a, b) => a.time.localeCompare(b.time));
         renderScheduleCardsToDOM(list, sortedLocal, todayStr);
@@ -2144,7 +2174,7 @@ async function loadTodaySchedule() {
 // --- KALENDER ---
 function getOverdueTasks() {
     const now = new Date();
-    return (JSON.parse(localStorage.getItem('nalaTasks')) || []).filter(t => {
+    return (JSON.parse(localStorage.getItem('polaTasks')) || []).filter(t => {
         if (t.status === 'done') return false;
         if (t.category !== 'Tugas Kuliah' && t.category !== 'Tugas') return false;
         const taskDateTime = parseLocalDateTime(t.date, t.time);
@@ -2239,7 +2269,7 @@ function renderMonthCalendar() {
     const firstDay = new Date(year, month, 1).getDay(); const daysInMonth = new Date(year, month + 1, 0).getDate();
     const prevDays = new Date(year, month, 0).getDate();
     
-    let savedTasks = JSON.parse(localStorage.getItem('nalaTasks')) || []; let savedMatkul = getActiveMatkulList(); let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
+    let savedTasks = JSON.parse(localStorage.getItem('polaTasks')) || []; let savedMatkul = getActiveMatkulList(); let overrides = JSON.parse(localStorage.getItem('polaOverrides')) || [];
     
     for(let i = firstDay - 1; i >= 0; i--) { gridHtml += `<div class="day-cell dimmed" onclick="changeMonth(-1)"><span class="day-number">${prevDays - i}</span></div>`; }
     for(let i = 1; i <= daysInMonth; i++) {
@@ -2284,7 +2314,7 @@ function renderUpcomingTasks() {
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    let pendingTasks = (JSON.parse(localStorage.getItem('nalaTasks')) || []).filter(t => {
+    let pendingTasks = (JSON.parse(localStorage.getItem('polaTasks')) || []).filter(t => {
         if (t.status === 'done' || (t.category !== 'Tugas Kuliah' && t.category !== 'Tugas')) return false;
         let taskDateTime = parseLocalDateTime(t.date, t.time);
         return taskDateTime >= now;
@@ -2374,7 +2404,7 @@ function renderHistory(tabName) {
         return;
     }
 
-    let doneTasks = (JSON.parse(localStorage.getItem('nalaTasks')) || []).filter(t => t.status === 'done' && t.category === tabName); 
+    let doneTasks = (JSON.parse(localStorage.getItem('polaTasks')) || []).filter(t => t.status === 'done' && t.category === tabName); 
     if(doneTasks.length === 0) { list.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center;">Belum ada riwayat selesai.</p>'; return; }
     
     let html = '';
@@ -2408,8 +2438,8 @@ function changeMonth(offset) { currentNavDate.setMonth(currentNavDate.getMonth()
 
 function showDayDetails(dateStr, dayName) {
     let savedMatkul = getActiveMatkulList(); 
-    let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
-    let savedTasks = JSON.parse(localStorage.getItem('nalaTasks')) || [];
+    let overrides = JSON.parse(localStorage.getItem('polaOverrides')) || [];
+    let savedTasks = JSON.parse(localStorage.getItem('polaTasks')) || [];
     
     let isHoliday = getHolidayInfo(dateStr); 
     let isOffDay = (dayName === 'Minggu') || isHoliday;
@@ -2488,7 +2518,7 @@ function showDayDetails(dateStr, dayName) {
 }
 
 function openRescheduleModal(matkulId, origDate, activeDate) {
-    closeModal('day-detail-modal'); let savedMatkul = getActiveMatkulList(); let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
+    closeModal('day-detail-modal'); let savedMatkul = getActiveMatkulList(); let overrides = JSON.parse(localStorage.getItem('polaOverrides')) || [];
     let original = savedMatkul.find(m => m.id === matkulId); let existing = overrides.find(o => o.matkulId === matkulId && o.originalDate === origDate);
     document.getElementById('res-matkulId').value = matkulId; document.getElementById('res-originalDate').value = origDate; 
     document.getElementById('res-date').value = existing ? existing.newDate : activeDate; document.getElementById('res-time').value = existing ? existing.newTime : original.jamMulai;
@@ -2501,9 +2531,9 @@ function openRescheduleModal(matkulId, origDate, activeDate) {
 function saveReschedule() {
     const mId = parseInt(document.getElementById('res-matkulId').value, 10); const origDate = document.getElementById('res-originalDate').value;
     const timeEndInput = document.getElementById('res-time-end'); const newEndTime = timeEndInput ? timeEndInput.value : '';
-    let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || []; overrides = overrides.filter(o => !(o.matkulId === mId && o.originalDate === origDate));
+    let overrides = JSON.parse(localStorage.getItem('polaOverrides')) || []; overrides = overrides.filter(o => !(o.matkulId === mId && o.originalDate === origDate));
     overrides.push({ matkulId: mId, originalDate: origDate, newDate: document.getElementById('res-date').value, newTime: document.getElementById('res-time').value, newEndTime: newEndTime, newRuangan: document.getElementById('res-ruang').value, newDosen: document.getElementById('res-dosen').value });
-    localStorage.setItem('nalaOverrides', JSON.stringify(overrides));
+    localStorage.setItem('polaOverrides', JSON.stringify(overrides));
     closeModal('reschedule-modal');
     refreshAllViews();
 }
@@ -2565,7 +2595,7 @@ function openModal(category) {
 
 function openEditTask(id, category) {
     openModal(category); editId = id; document.getElementById('modal-title').innerText = `Edit ${category}`;
-    let savedTasks = JSON.parse(localStorage.getItem('nalaTasks')) || []; let task = savedTasks.find(t => t.id == id);
+    let savedTasks = JSON.parse(localStorage.getItem('polaTasks')) || []; let task = savedTasks.find(t => t.id == id);
     if(task) {
         document.getElementById('new-task-name').value = task.name; document.getElementById('new-task-date').value = task.date;
         document.getElementById('new-task-time').value = task.time; document.getElementById('new-task-desc').value = task.deskripsi || '';
@@ -2585,7 +2615,7 @@ function openEditTask(id, category) {
 
 function openEditRoutine(id) {
     openModal('Rutinitas'); editId = id; document.getElementById('modal-title').innerText = `Edit Rutinitas`;
-    let savedRoutines = JSON.parse(localStorage.getItem('nalaRoutines')) || []; let routine = savedRoutines.find(r => r.id == id);
+    let savedRoutines = JSON.parse(localStorage.getItem('polaRoutines')) || []; let routine = savedRoutines.find(r => r.id == id);
     if(routine) {
         document.getElementById('new-task-name').value = routine.name; document.getElementById('new-task-time').value = routine.time;
         if(document.getElementById('new-task-desc')) document.getElementById('new-task-desc').value = routine.desc || '';
@@ -2599,7 +2629,7 @@ function openEditRoutine(id) {
 
 function openEditLibur(id) {
     openModal('Libur'); editId = id; document.getElementById('modal-title').innerText = `Edit Libur`;
-    let savedLibur = JSON.parse(localStorage.getItem('nalaLibur')) || []; let libur = savedLibur.find(l => l.id == id);
+    let savedLibur = JSON.parse(localStorage.getItem('polaLibur')) || []; let libur = savedLibur.find(l => l.id == id);
     if(libur) {
         document.getElementById('new-task-name').value = libur.name; 
         document.getElementById('new-task-date').value = libur.startDate;
@@ -2625,9 +2655,9 @@ async function saveNewTask() {
         const date = document.getElementById('new-task-date').value; const endDateInput = document.getElementById('new-task-date-end'); const endDate = (endDateInput && endDateInput.value) ? endDateInput.value : date;
         if(!name || !date) { await polaAlert("Nama dan Tanggal Mulai wajib diisi!"); return; }
         let liburData = { id: editId ? editId : Date.now(), name: name, startDate: date, endDate: endDate };
-        let savedLibur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
+        let savedLibur = JSON.parse(localStorage.getItem('polaLibur')) || [];
         if(editId) { const idx = savedLibur.findIndex(l => l.id == editId); if(idx !== -1) savedLibur[idx] = liburData; } else { savedLibur.push(liburData); }
-        localStorage.setItem('nalaLibur', JSON.stringify(savedLibur));
+        localStorage.setItem('polaLibur', JSON.stringify(savedLibur));
     } 
     else if(category === 'Rutinitas') {
         const time = document.getElementById('new-task-time').value;
@@ -2635,9 +2665,9 @@ async function saveNewTask() {
         let selectedDays = []; document.querySelectorAll('input[name="routine-days"]:checked').forEach(cb => selectedDays.push(cb.value));
         if(!name || !time || selectedDays.length === 0) { await polaAlert("Nama, jam, dan hari wajib diisi!"); return; }
         let routineData = { id: editId ? editId : Date.now(), name: name, time: time, days: selectedDays, color: document.getElementById('new-task-color').value, desc: desc, ...reminderData };
-        let savedRoutines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
+        let savedRoutines = JSON.parse(localStorage.getItem('polaRoutines')) || [];
         if(editId) { const idx = savedRoutines.findIndex(r => r.id == editId); if(idx !== -1) savedRoutines[idx] = routineData; } else { savedRoutines.push(routineData); }
-        localStorage.setItem('nalaRoutines', JSON.stringify(savedRoutines));
+        localStorage.setItem('polaRoutines', JSON.stringify(savedRoutines));
     }
     else if(category === 'Kuliah') {
         const matkulName = document.getElementById('task-matkul-select').value; const date = document.getElementById('new-task-date').value; const time = document.getElementById('new-task-time').value;
@@ -2648,9 +2678,9 @@ async function saveNewTask() {
         let orig = savedMatkul.find(m => m.name === matkulName);
         if(!orig) { await polaAlert("Data kuliah tidak ditemukan pada semester aktif!"); return; }
 
-        let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
+        let overrides = JSON.parse(localStorage.getItem('polaOverrides')) || [];
         overrides.push({ matkulId: orig.id, originalDate: 'EXTRA_'+Date.now(), newDate: date, newTime: time, newEndTime: endTime, newRuangan: ruang || orig.ruangan, newDosen: orig.dosen, ...reminderData });
-        localStorage.setItem('nalaOverrides', JSON.stringify(overrides));
+        localStorage.setItem('polaOverrides', JSON.stringify(overrides));
     }
     else {
         const time = document.getElementById('new-task-time').value; const date = document.getElementById('new-task-date').value; 
@@ -2678,9 +2708,9 @@ async function saveNewTask() {
         } 
         else { taskData.color = 'var(--color-tugas)'; }
         
-        let savedTasks = JSON.parse(localStorage.getItem('nalaTasks')) || [];
+        let savedTasks = JSON.parse(localStorage.getItem('polaTasks')) || [];
         if(editId) { const idx = savedTasks.findIndex(t => t.id == editId); if(idx !== -1) savedTasks[idx] = taskData; } else { savedTasks.push(taskData); }
-        localStorage.setItem('nalaTasks', JSON.stringify(savedTasks));
+        localStorage.setItem('polaTasks', JSON.stringify(savedTasks));
     }
     closeModal('insert-modal'); refreshAllViews();
 }
@@ -2712,7 +2742,7 @@ async function saveMatkul() {
     const remindVal = (!isNaN(parsedMRemind) && parsedMRemind > 0) ? parsedMRemind : null;
     const remindUnit = mRemindUnitEl ? mRemindUnitEl.value : 'minutes';
 
-    let savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
+    let savedMatkul = JSON.parse(localStorage.getItem('polaMatkul')) || [];
     let matkulData = {
         id: editId ? editId : Date.now(),
         semesterId: activeSemId,
@@ -2726,7 +2756,7 @@ async function saveMatkul() {
         remindUnit: remindUnit
     };
     if(editId) { const idx = savedMatkul.findIndex(m => m.id == editId); if(idx !== -1) savedMatkul[idx] = matkulData; } else { savedMatkul.push(matkulData); }
-    localStorage.setItem('nalaMatkul', JSON.stringify(savedMatkul));
+    localStorage.setItem('polaMatkul', JSON.stringify(savedMatkul));
     closeModal('matkul-modal');
     refreshAllViews();
 }
@@ -2786,7 +2816,7 @@ function renderMatkulList() {
 
 function editMatkul(id) {
     ensureReminderFieldsInjected();
-    let savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || []; let m = savedMatkul.find(x => x.id == id);
+    let savedMatkul = JSON.parse(localStorage.getItem('polaMatkul')) || []; let m = savedMatkul.find(x => x.id == id);
     if(m) {
         editId = m.id;
         document.getElementById('m-name').value = m.name;
@@ -2805,13 +2835,12 @@ function editMatkul(id) {
 async function deleteMatkul(id) {
     const ok = await polaConfirm('Hapus jadwal mata kuliah ini?', 'Hapus Mata Kuliah', 'Hapus');
     if(!ok) return;
-    let savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || []; savedMatkul = savedMatkul.filter(m => m.id != id);
-    localStorage.setItem('nalaMatkul', JSON.stringify(savedMatkul));
+    let savedMatkul = JSON.parse(localStorage.getItem('polaMatkul')) || []; savedMatkul = savedMatkul.filter(m => m.id != id);
+    localStorage.setItem('polaMatkul', JSON.stringify(savedMatkul));
 
-    // Bersihkan jadwal pengganti/pindahan milik mata kuliah ini
-    let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
+    let overrides = JSON.parse(localStorage.getItem('polaOverrides')) || [];
     overrides = overrides.filter(o => String(o.matkulId) !== String(id));
-    localStorage.setItem('nalaOverrides', JSON.stringify(overrides));
+    localStorage.setItem('polaOverrides', JSON.stringify(overrides));
 
     refreshAllViews();
 }

@@ -31,7 +31,7 @@ jobs:
       - name: Buat Project Android dengan Capacitor
         run: |
           npm init -y
-          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/local-notifications
+          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/local-notifications @capacitor/geolocation @capacitor/app
           npx cap init "Pola" "com.pola.tracker.v2" --web-dir=www
           npx cap add android
 
@@ -111,7 +111,7 @@ jobs:
             })();
           '
           npx capacitor-assets generate --android
-          
+
       - name: Pasang Suara Notifikasi Custom
         run: |
           mkdir -p android/app/src/main/res/raw
@@ -119,20 +119,37 @@ jobs:
             find assets/sounds -type f \( -iname "*.mp3" -o -iname "*.wav" -o -iname "*.ogg" \) -exec cp {} android/app/src/main/res/raw/ \;
           fi
 
-      - name: Tambahkan Izin Alarm & Notifikasi Android
+      - name: Sinkronisasi Capacitor
+        run: |
+          npx cap sync android
+
+      - name: Tambahkan Izin Alarm, Notifikasi & Lokasi Android
         run: |
           node -e '
             const fs = require("fs");
             const path = "android/app/src/main/AndroidManifest.xml";
             let xml = fs.readFileSync(path, "utf8");
-            const perms = `    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n`;
-            xml = xml.replace("<application", perms + "    <application");
+            const neededPerms = [
+              "android.permission.POST_NOTIFICATIONS",
+              "android.permission.SCHEDULE_EXACT_ALARM",
+              "android.permission.ACCESS_COARSE_LOCATION",
+              "android.permission.ACCESS_FINE_LOCATION"
+            ];
+            let permsBlock = "";
+            for (const p of neededPerms) {
+              if (!xml.includes(p)) {
+                permsBlock += `    <uses-permission android:name="${p}" />\n`;
+              }
+            }
+            if (!xml.includes("android.hardware.location.gps")) {
+              permsBlock += `    <uses-feature android:name="android.hardware.location.gps" android:required="false" />\n`;
+            }
+            xml = xml.replace("<application", permsBlock + "    <application");
             fs.writeFileSync(path, xml);
           '
 
-      - name: Sinkronisasi & Build APK
+      - name: Build APK
         run: |
-          npx cap sync android
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug

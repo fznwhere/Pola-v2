@@ -1,6 +1,10 @@
 let currentNavDate = new Date();
 let editId = null;
 const namaHari = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+const PAGE_ORDER = ['beranda', 'kalender', 'matkul'];
+const FORM_MODAL_IDS = ['insert-modal', 'matkul-modal', 'reschedule-modal', 'semester-form-modal'];
+const ALL_MODAL_IDS = ['semester-form-modal', 'insert-modal', 'matkul-modal', 'reschedule-modal', 'day-detail-modal', 'backup-modal', 'city-manual-modal'];
+
 let currentHistoryTab = 'Tugas Kuliah';
 let currentDrawerTab = 'Rutinitas';
 let currentMainPage = 'beranda';
@@ -8,6 +12,14 @@ let editSemesterId = null;
 let pendingBackupPayload = null;
 let scheduleRenderToken = 0;
 const fetchingHolidayYears = new Set();
+
+// Snapshot form untuk deteksi ketikan yang belum disimpan
+const modalFormSnapshots = {};
+let isPromptingUnsavedModal = false;
+
+// Manajemen tombol Back HP Android
+let overlayHistoryDepth = 0;
+let ignorePopstateCount = 0;
 
 // Data dasar libur nasional (cadangan offline instan)
 const defaultLiburNasional = {
@@ -62,6 +74,38 @@ const iDel = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${st
 const iPin = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${strk}" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>`;
 const iRef = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${strk}" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>`;
 const iBkp = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="var(--btn-primary)" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`;
+
+// --- STYLE INJECTION UNTUK CAROUSEL ANTAR HALAMAN (WHATSAPP-STYLE) ---
+function injectEnhancedStyles() {
+    if (document.getElementById('pola-enhanced-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'pola-enhanced-styles';
+    style.textContent = `
+        .pages-viewport {
+            width: 100%;
+            overflow-x: hidden;
+            position: relative;
+        }
+        .pages-track {
+            display: flex;
+            width: 300%;
+            align-items: flex-start;
+            will-change: transform;
+            transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        .page-view {
+            width: 33.333333%;
+            flex-shrink: 0;
+            box-sizing: border-box;
+        }
+        .pages-track:not(.swiping) .page-view.inactive-page {
+            max-height: 100vh;
+            overflow: hidden;
+            pointer-events: none;
+        }
+    `;
+    document.head.appendChild(style);
+}
 
 // --- MIGRASI OTOMATIS DATA LAMA (nala* -> pola*) ---
 function migrateLegacyStorageKeys() {
@@ -134,7 +178,215 @@ async function fetchWithTimeout(url, timeoutMs = 4000) {
     }
 }
 
-// --- NAVIGASI ANTAR-HALAMAN SPA (INSTAN TANPA RELOAD) ---
+// --- DETEKSI PERUBAHAN FORM & KONFIRMASI SEBELUM KELUAR MODAL ---
+function serializeModalInputs(modalId) {
+    const modal = document.getElementById(modalId);
+    if (!modal) return '';
+    const elements = modal.querySelectorAll('input, select, textarea');
+    const state = [];
+    elements.forEach((el, idx) => {
+        if (el.type === 'file') return;
+        const key = el.id || el.name || `idx_${idx}`;
+        if (el.type === 'checkbox' || el.type === 'radio') {
+            state.push(`${key}:${el.value}=${el.checked}`);
+        } else {
+            state.push(`${key}=${el.value}`);
+        }
+    });
+    return state.join('|');
+}
+
+function captureModalSnapshot(modalId) {
+    if (!FORM_MODAL_IDS.includes(modalId)) return;
+    modalFormSnapshots[modalId] = serializeModalInputs(modalId);
+}
+
+function hasUnsavedModalChanges(modalId) {
+    if (!FORM_MODAL_IDS.includes(modalId)) return false;
+    if (!(modalId in modalFormSnapshots)) return false;
+    return serializeModalInputs(modalId) !== modalFormSnapshots[modalId];
+}
+
+async function requestCloseModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (!modal || modal.style.display !== 'flex') return true;
+
+    if (FORM_MODAL_IDS.includes(modalId) && hasUnsavedModalChanges(modalId)) {
+        if (isPromptingUnsavedModal) return false;
+        isPromptingUnsavedModal = true;
+        const confirmDiscard = await polaConfirm(
+            'Data yang sudah kamu ketik belum disimpan. Yakin ingin keluar dan membuang perubahan?',
+            'Belum Disimpan',
+            'Ya, Keluar',
+            'Lanjut Isi'
+        );
+        isPromptingUnsavedModal = false;
+        if (!confirmDiscard) return false;
+    }
+
+    closeModal(modalId);
+    return true;
+}
+
+// --- MANAJEMEN TOMBOL BACK HP ANDROID ---
+function hasCapacitorAppPlugin() {
+    return !!(
+        window.Capacitor &&
+        window.Capacitor.Plugins &&
+        window.Capacitor.Plugins.App &&
+        typeof window.Capacitor.Plugins.App.addListener === 'function'
+    );
+}
+
+function isElementFlexVisible(id) {
+    const el = document.getElementById(id);
+    return !!(el && el.style.display === 'flex');
+}
+
+function hasAnyOpenOverlay() {
+    if (isElementFlexVisible('pola-dialog-overlay')) return true;
+    for (const mId of ALL_MODAL_IDS) {
+        if (isElementFlexVisible(mId)) return true;
+    }
+    const fabMenu = document.getElementById('fab-menu');
+    if (fabMenu && fabMenu.classList.contains('show')) return true;
+    const leftDrawer = document.getElementById('side-drawer');
+    if (leftDrawer && leftDrawer.classList.contains('open')) return true;
+    const rightDrawer = document.getElementById('right-semester-drawer');
+    if (rightDrawer && rightDrawer.classList.contains('open')) return true;
+    return false;
+}
+
+function pushOverlayHistoryState() {
+    if (hasCapacitorAppPlugin()) return;
+    overlayHistoryDepth++;
+    try {
+        window.history.pushState({ polaOverlayDepth: overlayHistoryDepth }, '');
+    } catch (e) {}
+}
+
+function popOverlayHistoryState() {
+    if (hasCapacitorAppPlugin()) return;
+    if (overlayHistoryDepth > 0) {
+        overlayHistoryDepth--;
+        ignorePopstateCount++;
+        try {
+            window.history.back();
+        } catch (e) {
+            ignorePopstateCount = Math.max(0, ignorePopstateCount - 1);
+        }
+    }
+}
+
+// Mengembalikan true jika tidak ada overlay tersisa sehingga aplikasi boleh keluar
+async function handleHardwareBackAction(fromPopstate = false) {
+    // 1. Jika dialog alert/confirm sedang terbuka, tutup dialog tersebut
+    const dialogOverlay = document.getElementById('pola-dialog-overlay');
+    if (dialogOverlay && dialogOverlay.style.display === 'flex') {
+        const cancelBtn = document.getElementById('pola-dialog-cancel');
+        const okBtn = document.getElementById('pola-dialog-ok');
+        if (cancelBtn) cancelBtn.click();
+        else if (okBtn) okBtn.click();
+        return false;
+    }
+
+    // 2. Cek semua modal (dari yang paling atas)
+    for (const mId of ALL_MODAL_IDS) {
+        if (isElementFlexVisible(mId)) {
+            if (FORM_MODAL_IDS.includes(mId)) {
+                await requestCloseModal(mId);
+            } else {
+                closeModal(mId, fromPopstate);
+            }
+            return false;
+        }
+    }
+
+    // 3. Jika menu FAB (+) terbuka, tutup menunya
+    const fabMenu = document.getElementById('fab-menu');
+    if (fabMenu && fabMenu.classList.contains('show')) {
+        closeFabMenu(fromPopstate);
+        return false;
+    }
+
+    // 4. Jika halaman geser kiri (Rutinitas/Acara/Libur) terbuka, tutup
+    const leftDrawer = document.getElementById('side-drawer');
+    if (leftDrawer && leftDrawer.classList.contains('open')) {
+        closeSideDrawer(fromPopstate);
+        return false;
+    }
+
+    // 5. Jika halaman geser kanan (Jadwal Semester) terbuka, tutup
+    const rightDrawer = document.getElementById('right-semester-drawer');
+    if (rightDrawer && rightDrawer.classList.contains('open')) {
+        closeRightSemesterDrawer(fromPopstate);
+        return false;
+    }
+
+    // 6. Sudah bersih di Beranda / Kalender / Kuliah -> boleh keluar aplikasi
+    return true;
+}
+
+function initAndroidBackButtonHandler() {
+    if (hasCapacitorAppPlugin()) {
+        window.Capacitor.Plugins.App.addListener('backButton', async () => {
+            const canExit = await handleHardwareBackAction(false);
+            if (canExit && typeof window.Capacitor.Plugins.App.exitApp === 'function') {
+                window.Capacitor.Plugins.App.exitApp();
+            }
+        });
+    } else {
+        window.addEventListener('popstate', async () => {
+            if (ignorePopstateCount > 0) {
+                ignorePopstateCount--;
+                return;
+            }
+            if (overlayHistoryDepth > 0) {
+                overlayHistoryDepth--;
+            }
+            await handleHardwareBackAction(true);
+            if (hasAnyOpenOverlay() && overlayHistoryDepth === 0) {
+                pushOverlayHistoryState();
+            }
+        });
+    }
+}
+
+// --- NAVIGASI ANTAR-HALAMAN SPA SEPERTI WHATSAPP (GESER TANPA BLUR) ---
+function ensurePagesCarouselStructure() {
+    injectEnhancedStyles();
+    const appContainer = document.querySelector('.app-container');
+    if (!appContainer) return;
+
+    let viewport = document.getElementById('pages-viewport');
+    let track = document.getElementById('pages-track');
+    if (!viewport) {
+        viewport = document.createElement('div');
+        viewport.id = 'pages-viewport';
+        viewport.className = 'pages-viewport';
+
+        track = document.createElement('div');
+        track.id = 'pages-track';
+        track.className = 'pages-track';
+
+        PAGE_ORDER.forEach((p) => {
+            const sec = document.getElementById(`page-${p}`);
+            if (sec) track.appendChild(sec);
+        });
+
+        viewport.appendChild(track);
+        appContainer.insertBefore(viewport, appContainer.firstChild);
+    }
+
+    PAGE_ORDER.forEach((p) => {
+        const sec = document.getElementById(`page-${p}`);
+        if (sec) {
+            sec.style.display = 'block';
+            sec.classList.toggle('inactive-page', p !== currentMainPage);
+        }
+    });
+}
+
 function updateFabForCurrentPage() {
     const menu = document.getElementById('fab-menu');
     if (!menu) return;
@@ -163,24 +415,51 @@ function handleMainFabClick() {
     }
 }
 
-function switchMainPage(pageName) {
-    if (!['beranda', 'kalender', 'matkul'].includes(pageName)) pageName = 'beranda';
+function switchMainPage(pageName, animate = true) {
+    if (!PAGE_ORDER.includes(pageName)) pageName = 'beranda';
+    const prevPage = currentMainPage;
     currentMainPage = pageName;
 
     closeFabMenu();
     closeSideDrawer();
     closeRightSemesterDrawer();
 
-    ['beranda', 'kalender', 'matkul'].forEach((p) => {
-        const section = document.getElementById(`page-${p}`);
-        if (section) section.style.display = (p === pageName) ? 'block' : 'none';
+    ensurePagesCarouselStructure();
+    const track = document.getElementById('pages-track');
+    const targetIndex = PAGE_ORDER.indexOf(pageName);
+
+    PAGE_ORDER.forEach((p) => {
         const navBtn = document.getElementById(`nav-${p}`);
         if (navBtn) navBtn.classList.toggle('active', p === pageName);
+        const sec = document.getElementById(`page-${p}`);
+        if (sec && p === pageName) {
+            sec.classList.remove('inactive-page');
+        }
     });
+
+    if (track) {
+        if (animate) {
+            track.classList.add('swiping');
+            track.style.transition = 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)';
+        } else {
+            track.style.transition = 'none';
+        }
+        track.style.transform = `translate3d(${-targetIndex * (100 / 3)}%, 0, 0)`;
+
+        window.setTimeout(() => {
+            track.classList.remove('swiping');
+            PAGE_ORDER.forEach((p) => {
+                const sec = document.getElementById(`page-${p}`);
+                if (sec) sec.classList.toggle('inactive-page', p !== currentMainPage);
+            });
+        }, animate ? 290 : 0);
+    }
 
     updateFabForCurrentPage();
     showFabAfterModal();
-    window.scrollTo({ top: 0, behavior: 'instant' });
+    if (prevPage !== pageName) {
+        window.scrollTo({ top: 0, behavior: 'instant' });
+    }
 
     if (pageName === 'beranda') {
         loadTodaySchedule();
@@ -224,7 +503,6 @@ function cleanupOldCache() {
         }
     });
 
-    // Bersihkan riwayat centang (salat/rutinitas) yang lebih dari 7 hari lalu
     try {
         const dismissed = JSON.parse(localStorage.getItem('polaDismissed'));
         if (Array.isArray(dismissed) && dismissed.length > 0) {
@@ -249,6 +527,7 @@ function ensurePolaDialogExists() {
     const overlay = document.createElement('div');
     overlay.id = 'pola-dialog-overlay';
     overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '9999';
     overlay.innerHTML = `
         <div class="modal pola-dialog-box">
             <h3 class="pola-dialog-title" id="pola-dialog-title">Pola.</h3>
@@ -263,36 +542,45 @@ function polaAlert(message, title = 'Perhatian') {
     ensurePolaDialogExists();
     return new Promise((resolve) => {
         const overlay = document.getElementById('pola-dialog-overlay');
+        const wasOpen = overlay.style.display === 'flex';
         document.getElementById('pola-dialog-title').innerText = title;
         document.getElementById('pola-dialog-msg').innerText = message;
         const btns = document.getElementById('pola-dialog-btns');
         btns.innerHTML = `<button class="btn-save" id="pola-dialog-ok">Mengerti</button>`;
         overlay.style.display = 'flex';
+        if (!wasOpen) pushOverlayHistoryState();
+
         document.getElementById('pola-dialog-ok').onclick = () => {
             overlay.style.display = 'none';
+            popOverlayHistoryState();
             resolve(true);
         };
     });
 }
 
-function polaConfirm(message, title = 'Konfirmasi', confirmLabel = 'Ya, Lanjutkan') {
+function polaConfirm(message, title = 'Konfirmasi', confirmLabel = 'Ya, Lanjutkan', cancelLabel = 'Batal') {
     ensurePolaDialogExists();
     return new Promise((resolve) => {
         const overlay = document.getElementById('pola-dialog-overlay');
+        const wasOpen = overlay.style.display === 'flex';
         document.getElementById('pola-dialog-title').innerText = title;
         document.getElementById('pola-dialog-msg').innerText = message;
         const btns = document.getElementById('pola-dialog-btns');
         btns.innerHTML = `
-            <button class="btn-cancel" id="pola-dialog-cancel">Batal</button>
+            <button class="btn-cancel" id="pola-dialog-cancel">${escapeHtml(cancelLabel)}</button>
             <button class="btn-save" id="pola-dialog-confirm">${escapeHtml(confirmLabel)}</button>
         `;
         overlay.style.display = 'flex';
+        if (!wasOpen) pushOverlayHistoryState();
+
         document.getElementById('pola-dialog-cancel').onclick = () => {
             overlay.style.display = 'none';
+            popOverlayHistoryState();
             resolve(false);
         };
         document.getElementById('pola-dialog-confirm').onclick = () => {
             overlay.style.display = 'none';
+            popOverlayHistoryState();
             resolve(true);
         };
     });
@@ -423,7 +711,7 @@ async function ensureAutoHolidaysForYear(year) {
     }
 }
 
-// --- LOKASI USER & JADWAL SALAT OTOMATIS (BULANAN + OFFLINE) ---
+// --- LOKASI USER & JADWAL SALAT OTOMATIS (CAPACITOR + WEB + KOTA MANUAL) ---
 function getSavedCoordinates() {
     try {
         const saved = JSON.parse(localStorage.getItem('polaUserLocation'));
@@ -470,74 +758,191 @@ async function resolveCityName(lat, lng) {
     return '';
 }
 
-function refreshUserCoordinates(manual = false) {
-    return new Promise((resolve) => {
-        const current = getSavedCoordinates();
-        if (!navigator.geolocation) {
-            if (manual) polaAlert('Perangkat atau browser ini tidak mendukung deteksi lokasi otomatis.');
-            resolve(current);
-            return;
+function applyNewCoordinates(lat, lng, cityName, isManualCity = false) {
+    const current = getSavedCoordinates();
+    const updated = {
+        lat: Number(lat.toFixed(4)),
+        lng: Number(lng.toFixed(4)),
+        city: cityName || current.city || 'Lokasi Terdeteksi',
+        isFallback: false,
+        isManualCity: isManualCity,
+        updatedAt: Date.now()
+    };
+    localStorage.setItem('polaUserLocation', JSON.stringify(updated));
+    updateLocationPillUI(null, false);
+
+    Object.keys(localStorage).forEach((k) => {
+        if (k.startsWith('polaSalatMonth_') || k.startsWith('polaSalat_')) {
+            localStorage.removeItem(k);
         }
+    });
+    if (document.getElementById('schedule-list')) loadTodaySchedule();
+    if (typeof syncAndroidAlarms === 'function') syncAndroidAlarms();
+    return updated;
+}
 
-        if (manual) updateLocationPillUI('Mencari lokasi...', true);
+function openManualCityModal() {
+    let modal = document.getElementById('city-manual-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'city-manual-modal';
+        modal.className = 'modal-overlay';
+        modal.innerHTML = `
+            <div class="modal">
+                <h2>Atur Kota Jadwal Salat</h2>
+                <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px; line-height:1.45;">
+                    Masukkan nama kota atau kabupatenmu jika izin GPS belum aktif di perangkat.
+                </p>
+                <form onsubmit="event.preventDefault(); saveManualCityLocation();">
+                    <label>Nama Kota / Kabupaten *</label>
+                    <input type="text" id="manual-city-input" placeholder="Contoh: Yogyakarta, Bandung, Surabaya">
+                </form>
+                <div class="modal-btns">
+                    <button type="button" class="btn-cancel" onclick="closeModal('city-manual-modal')">Batal</button>
+                    <button type="button" class="btn-save" onclick="saveManualCityLocation()">Simpan Kota</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
 
+    const input = document.getElementById('manual-city-input');
+    const cur = getSavedCoordinates();
+    if (input) input.value = cur.city || '';
+    hideFabForModal();
+    const wasOpen = modal.style.display === 'flex';
+    modal.style.display = 'flex';
+    if (!wasOpen) pushOverlayHistoryState();
+}
+
+async function saveManualCityLocation() {
+    const input = document.getElementById('manual-city-input');
+    const query = input ? input.value.trim() : '';
+    if (!query) {
+        await polaAlert('Masukkan nama kota terlebih dahulu.');
+        return;
+    }
+
+    updateLocationPillUI('Mencari kota...', true);
+    try {
+        const res = await fetchWithTimeout(
+            `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1&language=id&format=json`,
+            5000
+        );
+        if (res.ok) {
+            const data = await res.json();
+            if (data && Array.isArray(data.results) && data.results.length > 0) {
+                const hit = data.results[0];
+                const cleanCity = (hit.name || query).replace(/^Kota\s+|^Kabupaten\s+/i, '').trim();
+                applyNewCoordinates(hit.latitude, hit.longitude, cleanCity, true);
+                closeModal('city-manual-modal');
+                await polaAlert(`Jadwal salat berhasil disesuaikan ke wilayah ${cleanCity}.`, 'Kota Tersimpan');
+                return;
+            }
+        }
+    } catch (e) {}
+
+    updateLocationPillUI(null, false);
+    await polaAlert('Kota tidak ditemukan atau internet sedang offline. Coba ejaan nama kota lain.');
+}
+
+async function getRawDevicePosition(manual) {
+    // 1. Coba plugin native Capacitor Geolocation jika terpasang (memicu popup izin native Android)
+    const CapGeo = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Geolocation;
+    if (CapGeo && typeof CapGeo.getCurrentPosition === 'function') {
+        try {
+            if (typeof CapGeo.requestPermissions === 'function') {
+                const perm = await CapGeo.requestPermissions();
+                if (perm && perm.location === 'denied' && perm.coarseLocation === 'denied') {
+                    return null;
+                }
+            }
+            const pos = await CapGeo.getCurrentPosition({
+                enableHighAccuracy: false,
+                timeout: manual ? 10000 : 6000,
+                maximumAge: manual ? 0 : 15 * 60 * 1000
+            });
+            if (pos && pos.coords) {
+                return { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            }
+        } catch (e) {
+            // Lanjut fallback ke navigator.geolocation
+        }
+    }
+
+    // 2. Fallback WebView / Browser Geolocation (juga memicu popup izin jika AndroidManifest.xml sudah ada izin lokasi)
+    if (!navigator.geolocation) return null;
+
+    return new Promise((resolve) => {
         navigator.geolocation.getCurrentPosition(
-            async (pos) => {
-                const lat = Number(pos.coords.latitude.toFixed(4));
-                const lng = Number(pos.coords.longitude.toFixed(4));
-                const movedFar =
-                    current.isFallback ||
-                    Math.abs(lat - current.lat) > 0.06 ||
-                    Math.abs(lng - current.lng) > 0.06;
-
-                let cityName = (!movedFar && current.city) ? current.city : '';
-                if (!cityName || manual || movedFar) {
-                    const resolved = await resolveCityName(lat, lng);
-                    if (resolved) cityName = resolved;
-                }
-
-                const updated = {
-                    lat,
-                    lng,
-                    city: cityName || current.city || 'Lokasi Terdeteksi',
-                    isFallback: false,
-                    updatedAt: Date.now()
-                };
-                localStorage.setItem('polaUserLocation', JSON.stringify(updated));
-                updateLocationPillUI(null, false);
-
-                if (movedFar || manual) {
-                    Object.keys(localStorage).forEach((k) => {
-                        if (k.startsWith('polaSalatMonth_') || k.startsWith('polaSalat_')) {
-                            localStorage.removeItem(k);
-                        }
-                    });
-                    if (document.getElementById('schedule-list')) loadTodaySchedule();
-                    if (typeof syncAndroidAlarms === 'function') syncAndroidAlarms();
-                }
-                resolve(updated);
-            },
-            async () => {
-                if (!current.city) {
-                    const resolved = await resolveCityName(current.lat, current.lng);
-                    if (resolved) {
-                        current.city = resolved;
-                        localStorage.setItem('polaUserLocation', JSON.stringify(current));
-                    }
-                }
-                updateLocationPillUI(null, false);
-                if (manual) {
-                    await polaAlert('Gagal mendeteksi lokasi baru. Pastikan GPS dan izin lokasi untuk aplikasi Pola. sudah aktif.');
-                }
-                resolve(current);
-            },
+            (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+            () => resolve(null),
             {
-                enableHighAccuracy: manual,
+                enableHighAccuracy: false,
                 timeout: manual ? 10000 : 6000,
                 maximumAge: manual ? 0 : 15 * 60 * 1000
             }
         );
     });
+}
+
+async function refreshUserCoordinates(manual = false) {
+    const current = getSavedCoordinates();
+    // Jika user sudah mengatur kota manual dan ini bukan klik manual tombol lokasi, pertahankan pilihan kotanya
+    if (!manual && current.isManualCity) {
+        updateLocationPillUI(null, false);
+        return current;
+    }
+
+    if (manual) updateLocationPillUI('Mencari lokasi...', true);
+
+    const coords = await getRawDevicePosition(manual);
+    if (coords) {
+        const lat = Number(coords.lat.toFixed(4));
+        const lng = Number(coords.lng.toFixed(4));
+        const movedFar =
+            current.isFallback ||
+            current.isManualCity ||
+            Math.abs(lat - current.lat) > 0.06 ||
+            Math.abs(lng - current.lng) > 0.06;
+
+        let cityName = (!movedFar && current.city) ? current.city : '';
+        if (!cityName || manual || movedFar) {
+            const resolved = await resolveCityName(lat, lng);
+            if (resolved) cityName = resolved;
+        }
+
+        if (movedFar || manual) {
+            return applyNewCoordinates(lat, lng, cityName, false);
+        } else {
+            const updated = { ...current, city: cityName || current.city, isFallback: false, updatedAt: Date.now() };
+            localStorage.setItem('polaUserLocation', JSON.stringify(updated));
+            updateLocationPillUI(null, false);
+            return updated;
+        }
+    }
+
+    if (!current.city) {
+        const resolved = await resolveCityName(current.lat, current.lng);
+        if (resolved) {
+            current.city = resolved;
+            localStorage.setItem('polaUserLocation', JSON.stringify(current));
+        }
+    }
+    updateLocationPillUI(null, false);
+
+    if (manual) {
+        const wantManualCity = await polaConfirm(
+            'GPS tidak merespons atau izin lokasi belum diberikan di pengaturan HP. Ingin atur nama kota secara manual agar jadwal salat tetap akurat?',
+            'Lokasi Tidak Terdeteksi',
+            'Isi Nama Kota',
+            'Tutup'
+        );
+        if (wantManualCity) {
+            openManualCityModal();
+        }
+    }
+    return current;
 }
 
 function getCachedSalatTimingsSync(dateObj, dateStr) {
@@ -890,7 +1295,10 @@ function openBackupModal() {
     if (previewBox) previewBox.style.display = 'none';
 
     hideFabForModal();
-    document.getElementById('backup-modal').style.display = 'flex';
+    const modal = document.getElementById('backup-modal');
+    const wasOpen = modal.style.display === 'flex';
+    modal.style.display = 'flex';
+    if (!wasOpen) pushOverlayHistoryState();
 }
 
 function ensureBackupModalExists() {
@@ -1156,13 +1564,14 @@ function showFabAfterModal() {
     }
 }
 
-// --- EFEK BLUR PROGRESIF SAAT GESER ---
+// --- EFEK BLUR PROGRESIF SAAT GESER DRAWER ---
 function getOrCreateDrawerBlurBackdrop() {
     let backdrop = document.getElementById('drawer-blur-backdrop');
     if (!backdrop) {
         backdrop = document.createElement('div');
         backdrop.id = 'drawer-blur-backdrop';
         backdrop.className = 'drawer-blur-backdrop';
+        backdrop.onclick = closeAllDrawers;
         document.body.appendChild(backdrop);
     }
     return backdrop;
@@ -1198,6 +1607,11 @@ function finalizeDrawerBlur(isOpen) {
     backdrop.classList.toggle('show', isOpen);
 }
 
+function closeAllDrawers() {
+    closeSideDrawer();
+    closeRightSemesterDrawer();
+}
+
 // --- HALAMAN GESER KIRI FULL-SCREEN (BERANDA) ---
 function ensureSideDrawerStickyFooter() {
     const drawer = document.getElementById('side-drawer');
@@ -1216,6 +1630,7 @@ function ensureSideDrawerStickyFooter() {
 function openSideDrawer() {
     const drawer = document.getElementById('side-drawer');
     if (!drawer) return;
+    const wasOpen = drawer.classList.contains('open');
     ensureSideDrawerStickyFooter();
     drawer.style.transition = '';
     drawer.style.transform = '';
@@ -1224,22 +1639,21 @@ function openSideDrawer() {
     finalizeDrawerBlur(true);
     hideFabForModal();
     renderSideDrawerContent();
+    if (!wasOpen) pushOverlayHistoryState();
 }
 
-function closeSideDrawer() {
+function closeSideDrawer(skipHistoryPop = false) {
     const drawer = document.getElementById('side-drawer');
     if (!drawer) return;
+    const wasOpen = drawer.classList.contains('open');
     drawer.style.transition = '';
     drawer.style.transform = '';
     drawer.classList.remove('open');
     drawer.setAttribute('aria-hidden', 'true');
     finalizeDrawerBlur(false);
-    const insertModal = document.getElementById('insert-modal');
-    const backupModal = document.getElementById('backup-modal');
-    if (
-        (!insertModal || insertModal.style.display !== 'flex') &&
-        (!backupModal || backupModal.style.display !== 'flex')
-    ) {
+    if (wasOpen && !skipHistoryPop) popOverlayHistoryState();
+
+    if (!hasAnyOpenOverlay()) {
         showFabAfterModal();
     }
 }
@@ -1441,92 +1855,6 @@ function renderSideDrawerContent() {
     }
 }
 
-function initSideDrawerGestures() {
-    const drawer = document.getElementById('side-drawer');
-    if (!drawer) return;
-
-    ensureSideDrawerStickyFooter();
-    const backdrop = getOrCreateDrawerBlurBackdrop();
-    let startX = 0;
-    let startY = 0;
-    let currentX = 0;
-    let gestureDecided = false;
-    let isDragging = false;
-    let startedOpen = false;
-
-    document.addEventListener('touchstart', (e) => {
-        if (e.touches.length !== 1) return;
-        if (currentMainPage !== 'beranda') return;
-        const insertModal = document.getElementById('insert-modal');
-        const backupModal = document.getElementById('backup-modal');
-        if (
-            (insertModal && insertModal.style.display === 'flex') ||
-            (backupModal && backupModal.style.display === 'flex')
-        ) return;
-
-        startX = e.touches[0].clientX;
-        startY = e.touches[0].clientY;
-        currentX = startX;
-        gestureDecided = false;
-        isDragging = false;
-        startedOpen = drawer.classList.contains('open');
-    }, { passive: true });
-
-    document.addEventListener('touchmove', (e) => {
-        if (e.touches.length !== 1) return;
-        if (currentMainPage !== 'beranda') return;
-        const insertModal = document.getElementById('insert-modal');
-        const backupModal = document.getElementById('backup-modal');
-        if (
-            (insertModal && insertModal.style.display === 'flex') ||
-            (backupModal && backupModal.style.display === 'flex')
-        ) return;
-
-        currentX = e.touches[0].clientX;
-        const dx = currentX - startX;
-        const dy = e.touches[0].clientY - startY;
-
-        if (!gestureDecided) {
-            if (Math.abs(dx) < 14 && Math.abs(dy) < 14) return;
-            gestureDecided = true;
-            if (Math.abs(dx) > Math.abs(dy) * 1.35) {
-                if (!startedOpen && dx > 0) isDragging = true;
-                if (startedOpen && dx < 0) isDragging = true;
-            }
-            if (isDragging) {
-                drawer.style.transition = 'none';
-                drawer.style.visibility = 'visible';
-                backdrop.style.transition = 'none';
-                if (!startedOpen) renderSideDrawerContent();
-            }
-        }
-
-        if (!isDragging) return;
-        const drawerWidth = drawer.offsetWidth || window.innerWidth;
-        let progress = startedOpen ? 1 + dx / drawerWidth : dx / drawerWidth;
-        progress = Math.max(0, Math.min(1, progress));
-
-        drawer.style.transform = `translate(${-150 + progress * 100}%, 0)`;
-        setDrawerBlurProgress(progress);
-    }, { passive: true });
-
-    document.addEventListener('touchend', () => {
-        if (!isDragging) return;
-        isDragging = false;
-        const dx = currentX - startX;
-        const drawerWidth = drawer.offsetWidth || window.innerWidth;
-        const threshold = drawerWidth * 0.25;
-
-        if (!startedOpen) {
-            if (dx > threshold) openSideDrawer();
-            else closeSideDrawer();
-        } else {
-            if (dx < -threshold) closeSideDrawer();
-            else openSideDrawer();
-        }
-    });
-}
-
 // --- HALAMAN GESER KANAN FULL-SCREEN (SEMESTER MATKUL) ---
 function setupMatkulSemesterUI() {
     const matkulListEl = document.getElementById('matkul-list');
@@ -1589,13 +1917,12 @@ function setupMatkulSemesterUI() {
         `;
         document.body.appendChild(modal);
     }
-
-    initRightDrawerGestures();
 }
 
 function openRightSemesterDrawer() {
     const drawer = document.getElementById('right-semester-drawer');
     if (!drawer) return;
+    const wasOpen = drawer.classList.contains('open');
     drawer.style.transition = '';
     drawer.style.transform = '';
     drawer.classList.add('open');
@@ -1603,18 +1930,21 @@ function openRightSemesterDrawer() {
     finalizeDrawerBlur(true);
     hideFabForModal();
     renderSemesterDrawerList();
+    if (!wasOpen) pushOverlayHistoryState();
 }
 
-function closeRightSemesterDrawer() {
+function closeRightSemesterDrawer(skipHistoryPop = false) {
     const drawer = document.getElementById('right-semester-drawer');
     if (!drawer) return;
+    const wasOpen = drawer.classList.contains('open');
     drawer.style.transition = '';
     drawer.style.transform = '';
     drawer.classList.remove('open');
     drawer.setAttribute('aria-hidden', 'true');
     finalizeDrawerBlur(false);
-    const matkulModal = document.getElementById('matkul-modal');
-    if (!matkulModal || matkulModal.style.display !== 'flex') {
+    if (wasOpen && !skipHistoryPop) popOverlayHistoryState();
+
+    if (!hasAnyOpenOverlay()) {
         showFabAfterModal();
     }
 }
@@ -1663,7 +1993,11 @@ function openNewSemesterModal() {
     document.getElementById('sem-name-input').value = '';
     document.getElementById('sem-copy-wrapper').style.display = 'block';
     document.getElementById('sem-copy-select').value = 'empty';
-    document.getElementById('semester-form-modal').style.display = 'flex';
+    const modal = document.getElementById('semester-form-modal');
+    const wasOpen = modal.style.display === 'flex';
+    modal.style.display = 'flex';
+    captureModalSnapshot('semester-form-modal');
+    if (!wasOpen) pushOverlayHistoryState();
 }
 
 function openEditSemesterModal(semId) {
@@ -1674,7 +2008,11 @@ function openEditSemesterModal(semId) {
     document.getElementById('sem-modal-title').innerText = 'Ubah Nama Semester';
     document.getElementById('sem-name-input').value = target.name;
     document.getElementById('sem-copy-wrapper').style.display = 'none';
-    document.getElementById('semester-form-modal').style.display = 'flex';
+    const modal = document.getElementById('semester-form-modal');
+    const wasOpen = modal.style.display === 'flex';
+    modal.style.display = 'flex';
+    captureModalSnapshot('semester-form-modal');
+    if (!wasOpen) pushOverlayHistoryState();
 }
 
 async function saveSemesterForm() {
@@ -1748,39 +2086,47 @@ async function deleteSemesterItem(semId) {
     refreshAllViews();
 }
 
-function initRightDrawerGestures() {
-    const drawer = document.getElementById('right-semester-drawer');
-    if (!drawer) return;
+// --- PENGENDALI GESER TERPADU: ANTAR HALAMAN (TANPA BLUR) & DRAWER (DENGAN BLUR) ---
+function initUnifiedSwipeGestures() {
+    ensurePagesCarouselStructure();
+    ensureSideDrawerStickyFooter();
 
+    const leftDrawer = document.getElementById('side-drawer');
+    const rightDrawer = document.getElementById('right-semester-drawer');
     const backdrop = getOrCreateDrawerBlurBackdrop();
+    const track = document.getElementById('pages-track');
+    const viewport = document.getElementById('pages-viewport');
+
     let startX = 0;
     let startY = 0;
     let currentX = 0;
     let gestureDecided = false;
-    let isDragging = false;
-    let startedOpen = false;
+    let swipeMode = null; // 'left-drawer' | 'right-drawer' | 'page-carousel'
+    let startedDrawerOpen = false;
 
     document.addEventListener('touchstart', (e) => {
         if (e.touches.length !== 1) return;
-        if (currentMainPage !== 'matkul') return;
-        const matkulModal = document.getElementById('matkul-modal');
-        const semModal = document.getElementById('semester-form-modal');
-        if ((matkulModal && matkulModal.style.display === 'flex') || (semModal && semModal.style.display === 'flex')) return;
+        if (isPromptingUnsavedModal || isElementFlexVisible('pola-dialog-overlay')) return;
+        for (const mId of ALL_MODAL_IDS) {
+            if (isElementFlexVisible(mId)) return;
+        }
+        const fabMenu = document.getElementById('fab-menu');
+        if (fabMenu && fabMenu.classList.contains('show')) return;
+        if (e.target && e.target.closest('input, textarea, select')) return;
 
         startX = e.touches[0].clientX;
         startY = e.touches[0].clientY;
         currentX = startX;
         gestureDecided = false;
-        isDragging = false;
-        startedOpen = drawer.classList.contains('open');
+        swipeMode = null;
     }, { passive: true });
 
     document.addEventListener('touchmove', (e) => {
         if (e.touches.length !== 1) return;
-        if (currentMainPage !== 'matkul') return;
-        const matkulModal = document.getElementById('matkul-modal');
-        const semModal = document.getElementById('semester-form-modal');
-        if ((matkulModal && matkulModal.style.display === 'flex') || (semModal && semModal.style.display === 'flex')) return;
+        if (isPromptingUnsavedModal || isElementFlexVisible('pola-dialog-overlay')) return;
+        for (const mId of ALL_MODAL_IDS) {
+            if (isElementFlexVisible(mId)) return;
+        }
 
         currentX = e.touches[0].clientX;
         const dx = currentX - startX;
@@ -1789,40 +2135,125 @@ function initRightDrawerGestures() {
         if (!gestureDecided) {
             if (Math.abs(dx) < 14 && Math.abs(dy) < 14) return;
             gestureDecided = true;
-            if (Math.abs(dx) > Math.abs(dy) * 1.35) {
-                if (!startedOpen && dx < 0) isDragging = true;
-                if (startedOpen && dx > 0) isDragging = true;
+
+            if (Math.abs(dx) <= Math.abs(dy) * 1.35) {
+                swipeMode = null;
+                return;
             }
-            if (isDragging) {
-                drawer.style.transition = 'none';
-                drawer.style.visibility = 'visible';
+
+            const isLeftOpen = !!(leftDrawer && leftDrawer.classList.contains('open'));
+            const isRightOpen = !!(rightDrawer && rightDrawer.classList.contains('open'));
+
+            if (isLeftOpen) {
+                if (dx < 0 && leftDrawer) {
+                    swipeMode = 'left-drawer';
+                    startedDrawerOpen = true;
+                    leftDrawer.style.transition = 'none';
+                    leftDrawer.style.visibility = 'visible';
+                    backdrop.style.transition = 'none';
+                }
+            } else if (isRightOpen) {
+                if (dx > 0 && rightDrawer) {
+                    swipeMode = 'right-drawer';
+                    startedDrawerOpen = true;
+                    rightDrawer.style.transition = 'none';
+                    rightDrawer.style.visibility = 'visible';
+                    backdrop.style.transition = 'none';
+                }
+            } else if (currentMainPage === 'beranda' && dx > 0 && leftDrawer) {
+                // Ujung kiri (Beranda) digeser ke kanan -> buka Side Drawer DENGAN BLUR
+                swipeMode = 'left-drawer';
+                startedDrawerOpen = false;
+                leftDrawer.style.transition = 'none';
+                leftDrawer.style.visibility = 'visible';
                 backdrop.style.transition = 'none';
-                if (!startedOpen) renderSemesterDrawerList();
+                renderSideDrawerContent();
+            } else if (currentMainPage === 'matkul' && dx < 0 && rightDrawer) {
+                // Ujung kanan (Kuliah) digeser ke kiri -> buka Semester Drawer DENGAN BLUR
+                swipeMode = 'right-drawer';
+                startedDrawerOpen = false;
+                rightDrawer.style.transition = 'none';
+                rightDrawer.style.visibility = 'visible';
+                backdrop.style.transition = 'none';
+                renderSemesterDrawerList();
+            } else if (track) {
+                // Geser antar halaman utama (Beranda <-> Kalender <-> Kuliah) TANPA BLUR
+                const curIdx = PAGE_ORDER.indexOf(currentMainPage);
+                if ((dx < 0 && curIdx < PAGE_ORDER.length - 1) || (dx > 0 && curIdx > 0)) {
+                    swipeMode = 'page-carousel';
+                    setDrawerBlurProgress(0);
+                    track.classList.add('swiping');
+                    track.style.transition = 'none';
+                    PAGE_ORDER.forEach((p) => {
+                        const sec = document.getElementById(`page-${p}`);
+                        if (sec) sec.classList.remove('inactive-page');
+                    });
+                }
             }
         }
 
-        if (!isDragging) return;
-        const drawerWidth = drawer.offsetWidth || window.innerWidth;
-        let progress = startedOpen ? 1 - dx / drawerWidth : -dx / drawerWidth;
-        progress = Math.max(0, Math.min(1, progress));
+        if (!swipeMode) return;
 
-        drawer.style.transform = `translate(${50 - progress * 100}%, 0)`;
-        setDrawerBlurProgress(progress);
+        if (swipeMode === 'left-drawer' && leftDrawer) {
+            const drawerWidth = leftDrawer.offsetWidth || window.innerWidth;
+            let progress = startedDrawerOpen ? 1 + dx / drawerWidth : dx / drawerWidth;
+            progress = Math.max(0, Math.min(1, progress));
+            leftDrawer.style.transform = `translate(${-150 + progress * 100}%, 0)`;
+            setDrawerBlurProgress(progress);
+        } else if (swipeMode === 'right-drawer' && rightDrawer) {
+            const drawerWidth = rightDrawer.offsetWidth || window.innerWidth;
+            let progress = startedDrawerOpen ? 1 - dx / drawerWidth : -dx / drawerWidth;
+            progress = Math.max(0, Math.min(1, progress));
+            rightDrawer.style.transform = `translate(${50 - progress * 100}%, 0)`;
+            setDrawerBlurProgress(progress);
+        } else if (swipeMode === 'page-carousel' && track) {
+            const curIdx = PAGE_ORDER.indexOf(currentMainPage);
+            const vpWidth = (viewport && viewport.offsetWidth) || window.innerWidth;
+            const clampedDx = Math.max(-vpWidth, Math.min(vpWidth, dx));
+            const basePct = -curIdx * (100 / 3);
+            const deltaPct = (clampedDx / vpWidth) * (100 / 3);
+            track.style.transform = `translate3d(${basePct + deltaPct}%, 0, 0)`;
+        }
     }, { passive: true });
 
     document.addEventListener('touchend', () => {
-        if (!isDragging) return;
-        isDragging = false;
+        if (!swipeMode) return;
+        const mode = swipeMode;
+        swipeMode = null;
         const dx = currentX - startX;
-        const drawerWidth = drawer.offsetWidth || window.innerWidth;
-        const threshold = drawerWidth * 0.25;
 
-        if (!startedOpen) {
-            if (dx < -threshold) openRightSemesterDrawer();
-            else closeRightSemesterDrawer();
-        } else {
-            if (dx > threshold) closeRightSemesterDrawer();
-            else openRightSemesterDrawer();
+        if (mode === 'left-drawer' && leftDrawer) {
+            const drawerWidth = leftDrawer.offsetWidth || window.innerWidth;
+            const threshold = drawerWidth * 0.25;
+            if (!startedDrawerOpen) {
+                if (dx > threshold) openSideDrawer();
+                else closeSideDrawer(true);
+            } else {
+                if (dx < -threshold) closeSideDrawer();
+                else openSideDrawer();
+            }
+        } else if (mode === 'right-drawer' && rightDrawer) {
+            const drawerWidth = rightDrawer.offsetWidth || window.innerWidth;
+            const threshold = drawerWidth * 0.25;
+            if (!startedDrawerOpen) {
+                if (dx < -threshold) openRightSemesterDrawer();
+                else closeRightSemesterDrawer(true);
+            } else {
+                if (dx > threshold) closeRightSemesterDrawer();
+                else openRightSemesterDrawer();
+            }
+        } else if (mode === 'page-carousel') {
+            const curIdx = PAGE_ORDER.indexOf(currentMainPage);
+            const vpWidth = (viewport && viewport.offsetWidth) || window.innerWidth;
+            const threshold = vpWidth * 0.22;
+
+            if (dx < -threshold && curIdx < PAGE_ORDER.length - 1) {
+                switchMainPage(PAGE_ORDER[curIdx + 1], true);
+            } else if (dx > threshold && curIdx > 0) {
+                switchMainPage(PAGE_ORDER[curIdx - 1], true);
+            } else {
+                switchMainPage(currentMainPage, true);
+            }
         }
     });
 }
@@ -1834,7 +2265,7 @@ function getOrCreateFabBackdrop() {
         backdrop = document.createElement('div');
         backdrop.id = 'fab-backdrop';
         backdrop.className = 'fab-backdrop';
-        backdrop.onclick = closeFabMenu;
+        backdrop.onclick = () => closeFabMenu();
         fabContainer.parentNode.insertBefore(backdrop, fabContainer);
     }
     return backdrop;
@@ -1846,18 +2277,24 @@ function toggleFabMenu() {
     const backdrop = getOrCreateFabBackdrop();
     if (!menu) return;
 
+    const wasOpen = menu.classList.contains('show');
     const isOpen = menu.classList.toggle('show');
     if (fab) fab.classList.toggle('active', isOpen);
     if (backdrop) backdrop.classList.toggle('show', isOpen);
+
+    if (isOpen && !wasOpen) pushOverlayHistoryState();
+    else if (!isOpen && wasOpen) popOverlayHistoryState();
 }
 
-function closeFabMenu() {
+function closeFabMenu(skipHistoryPop = false) {
     const menu = document.getElementById('fab-menu');
     const fab = document.querySelector('.fab-container .fab');
     const backdrop = document.getElementById('fab-backdrop');
+    const wasOpen = !!(menu && menu.classList.contains('show'));
     if (menu) menu.classList.remove('show');
     if (fab) fab.classList.remove('active');
     if (backdrop) backdrop.classList.remove('show');
+    if (wasOpen && !skipHistoryPop) popOverlayHistoryState();
 }
 
 function initFabScrollBehavior() {
@@ -1954,10 +2391,13 @@ function initRoutineSelectAll() {
     });
 }
 
-function closeModal(id) {
+function closeModal(id, skipHistoryPop = false) {
     const el = document.getElementById(id);
+    const wasOpen = !!(el && el.style.display === 'flex');
     if (el) el.style.display = 'none';
-    if (id !== 'semester-form-modal' && id !== 'backup-modal') editId = null;
+    delete modalFormSnapshots[id];
+    if (id !== 'semester-form-modal' && id !== 'backup-modal' && id !== 'city-manual-modal') editId = null;
+    if (wasOpen && !skipHistoryPop) popOverlayHistoryState();
     showFabAfterModal();
 }
 
@@ -2557,7 +2997,10 @@ function showDayDetails(dateStr, dayName) {
     document.getElementById('detail-date-title').innerText = `${formatShortDate(dateStr)}${holidayText}`; 
     document.getElementById('detail-list').innerHTML = listHtml;
     hideFabForModal();
-    document.getElementById('day-detail-modal').style.display = 'flex';
+    const modal = document.getElementById('day-detail-modal');
+    const wasOpen = modal.style.display === 'flex';
+    modal.style.display = 'flex';
+    if (!wasOpen) pushOverlayHistoryState();
 }
 
 function openRescheduleModal(matkulId, origDate, activeDate) {
@@ -2568,7 +3011,11 @@ function openRescheduleModal(matkulId, origDate, activeDate) {
     if(document.getElementById('res-time-end')) document.getElementById('res-time-end').value = existing && existing.newEndTime !== undefined ? existing.newEndTime : original.jamSelesai;
     document.getElementById('res-ruang').value = existing ? existing.newRuangan : original.ruangan; document.getElementById('res-dosen').value = existing ? existing.newDosen : original.dosen;
     hideFabForModal();
-    document.getElementById('reschedule-modal').style.display = 'flex';
+    const modal = document.getElementById('reschedule-modal');
+    const wasOpen = modal.style.display === 'flex';
+    modal.style.display = 'flex';
+    captureModalSnapshot('reschedule-modal');
+    if (!wasOpen) pushOverlayHistoryState();
 }
 
 function saveReschedule() {
@@ -2633,7 +3080,11 @@ function openModal(category) {
         sel.innerHTML = optHtml;
     }
     hideFabForModal();
-    document.getElementById('insert-modal').style.display = 'flex';
+    const modal = document.getElementById('insert-modal');
+    const wasOpen = modal.style.display === 'flex';
+    modal.style.display = 'flex';
+    captureModalSnapshot('insert-modal');
+    if (!wasOpen) pushOverlayHistoryState();
 }
 
 function openEditTask(id, category) {
@@ -2654,6 +3105,7 @@ function openEditTask(id, category) {
         
         if(category === 'Tugas Kuliah') { document.getElementById('task-matkul-select').value = task.matkulId; document.getElementById('task-via').value = task.pengumpulan; }
     }
+    captureModalSnapshot('insert-modal');
 }
 
 function openEditRoutine(id) {
@@ -2668,6 +3120,7 @@ function openEditRoutine(id) {
         document.querySelectorAll('input[name="routine-days"]').forEach(cb => { cb.checked = routine.days.includes(cb.value); });
         syncRoutineSelectAllState();
     }
+    captureModalSnapshot('insert-modal');
 }
 
 function openEditLibur(id) {
@@ -2678,6 +3131,7 @@ function openEditLibur(id) {
         document.getElementById('new-task-date').value = libur.startDate;
         if(document.getElementById('new-task-date-end')) document.getElementById('new-task-date-end').value = libur.endDate;
     }
+    captureModalSnapshot('insert-modal');
 }
 
 function readCustomReminderFromInsert() {
@@ -2771,7 +3225,11 @@ function openMatkulModal() {
     if (document.getElementById('m-remind-val')) document.getElementById('m-remind-val').value = '';
     if (document.getElementById('m-remind-unit')) document.getElementById('m-remind-unit').value = 'minutes';
     hideFabForModal();
-    document.getElementById('matkul-modal').style.display = 'flex';
+    const modal = document.getElementById('matkul-modal');
+    const wasOpen = modal.style.display === 'flex';
+    modal.style.display = 'flex';
+    captureModalSnapshot('matkul-modal');
+    if (!wasOpen) pushOverlayHistoryState();
 }
 
 async function saveMatkul() {
@@ -2871,7 +3329,11 @@ function editMatkul(id) {
         if (document.getElementById('m-remind-val')) document.getElementById('m-remind-val').value = m.remindVal || '';
         if (document.getElementById('m-remind-unit')) document.getElementById('m-remind-unit').value = m.remindUnit || 'minutes';
         hideFabForModal();
-        document.getElementById('matkul-modal').style.display = 'flex';
+        const modal = document.getElementById('matkul-modal');
+        const wasOpen = modal.style.display === 'flex';
+        modal.style.display = 'flex';
+        captureModalSnapshot('matkul-modal');
+        if (!wasOpen) pushOverlayHistoryState();
     }
 }
 
@@ -2890,6 +3352,7 @@ async function deleteMatkul(id) {
 
 document.addEventListener("DOMContentLoaded", () => { 
     ensurePolaDialogExists();
+    ensurePagesCarouselStructure();
     ensureSideDrawerStickyFooter();
     document.querySelectorAll('.fab').forEach(f => f.innerHTML = iPls);
     updateFabForCurrentPage();
@@ -2897,7 +3360,8 @@ document.addEventListener("DOMContentLoaded", () => {
     initRoutineSelectAll();
     initFabScrollBehavior();
     ensureReminderFieldsInjected();
-    initSideDrawerGestures();
+    initUnifiedSwipeGestures();
+    initAndroidBackButtonHandler();
 
     document.querySelectorAll('.swatch').forEach(sw => { 
         sw.addEventListener('click', function(e) { 
@@ -2905,19 +3369,29 @@ document.addEventListener("DOMContentLoaded", () => {
         }); 
     });
 
-    // --- FITUR TUTUP MODAL INFORMASI DENGAN KLIK DI LUAR (FORM TETAP AMAN) ---
-    window.addEventListener('click', function(e) {
-        const dismissibleModals = ['day-detail-modal', 'backup-modal']; 
-        
-        dismissibleModals.forEach(modalId => {
+    // --- KLIK AREA BLUR DI LUAR KOTAK MODAL ---
+    window.addEventListener('click', async function(e) {
+        if (isPromptingUnsavedModal || isElementFlexVisible('pola-dialog-overlay')) return;
+
+        const infoModals = ['day-detail-modal', 'backup-modal', 'city-manual-modal'];
+        for (const modalId of infoModals) {
             const overlay = document.getElementById(modalId);
-            if (overlay && e.target === overlay) {
+            if (overlay && overlay.style.display === 'flex' && e.target === overlay) {
                 closeModal(modalId);
+                return;
             }
-        });
+        }
+
+        for (const formModalId of FORM_MODAL_IDS) {
+            const overlay = document.getElementById(formModalId);
+            if (overlay && overlay.style.display === 'flex' && e.target === overlay) {
+                await requestCloseModal(formModalId);
+                return;
+            }
+        }
     });
 
-    // --- LOGIKA ANIMASI INTRO ANTI-STUCK (AMAN) ---
+    // --- LOGIKA ANIMASI INTRO ANTI-STUCK ---
     const introScreen = document.getElementById('intro-screen');
     if (introScreen) {
         if (!sessionStorage.getItem('introPlayed')) {

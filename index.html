@@ -14,8 +14,8 @@
         <video id="intro-video" src="assets/media/intro.mp4" autoplay muted playsinline></video>
     </div>
 
-    <!-- EFEK BLUR PROGRESIF SAAT GESER -->
-    <div class="drawer-blur-backdrop" id="drawer-blur-backdrop"></div>
+    <!-- EFEK BLUR PROGRESIF SAAT GESER DRAWER -->
+    <div class="drawer-blur-backdrop" id="drawer-blur-backdrop" onclick="closeAllDrawers()"></div>
 
     <!-- PANEL GESER KIRI FULL-SCREEN (BERANDA) -->
     <aside class="side-drawer" id="side-drawer" aria-hidden="true">
@@ -48,53 +48,57 @@
     </aside>
 
     <div class="app-container">
-        <!-- HALAMAN 1: BERANDA -->
-        <section id="page-beranda" class="page-view">
-            <header>
-                <h1 class="brand-title">Pola<span class="brand-dot">.</span></h1>
-                <p>Hari Ini</p>
-            </header>
-            <div id="schedule-list"></div>
-        </section>
+        <div id="pages-viewport" class="pages-viewport">
+            <div id="pages-track" class="pages-track">
+                <!-- HALAMAN 1: BERANDA -->
+                <section id="page-beranda" class="page-view">
+                    <header>
+                        <h1 class="brand-title">Pola<span class="brand-dot">.</span></h1>
+                        <p>Hari Ini</p>
+                    </header>
+                    <div id="schedule-list"></div>
+                </section>
 
-        <!-- HALAMAN 2: KALENDER -->
-        <section id="page-kalender" class="page-view" style="display: none;">
-            <div class="calendar-header">
-                <button class="btn-prev" onclick="changeMonth(-1)">❮</button>
-                <div style="position: relative; cursor: pointer; text-align: center; display: flex; flex-direction: column; align-items: center; width: 100%;">
-                    <h1 class="brand-title" style="margin-bottom: 2px;">Pola<span class="brand-dot">.</span></h1>
-                    <p id="month-display-text" style="color: var(--text-muted); font-size: 14px; font-weight: 500;"></p>
-                    <input type="month" id="native-month-picker" style="position: absolute; top:0; left:0; width:100%; height:100%; opacity:0; cursor: pointer;">
-                </div>
-                <button class="btn-next" onclick="changeMonth(1)">❯</button>
+                <!-- HALAMAN 2: KALENDER -->
+                <section id="page-kalender" class="page-view">
+                    <div class="calendar-header">
+                        <button class="btn-prev" onclick="changeMonth(-1)">❮</button>
+                        <div style="position: relative; cursor: pointer; text-align: center; display: flex; flex-direction: column; align-items: center; width: 100%;">
+                            <h1 class="brand-title" style="margin-bottom: 2px;">Pola<span class="brand-dot">.</span></h1>
+                            <p id="month-display-text" style="color: var(--text-muted); font-size: 14px; font-weight: 500;"></p>
+                            <input type="month" id="native-month-picker" style="position: absolute; top:0; left:0; width:100%; height:100%; opacity:0; cursor: pointer;">
+                        </div>
+                        <button class="btn-next" onclick="changeMonth(1)">❯</button>
+                    </div>
+
+                    <div class="calendar-grid" id="calendar-grid"></div>
+
+                    <div class="upcoming-container">
+                        <h2 class="section-title">Tugas Belum Selesai</h2>
+                        <div id="upcoming-list"></div>
+                    </div>
+
+                    <div class="history-container">
+                        <h2 class="section-title">Riwayat & Terlewat</h2>
+                        <div class="history-tabs">
+                            <button class="tab-btn active" id="tab-tk" onclick="renderHistory('Tugas Kuliah')">Tugas Kuliah</button>
+                            <button class="tab-btn" id="tab-tb" onclick="renderHistory('Tugas')">Tugas</button>
+                            <button class="tab-btn" id="tab-terlewat" onclick="renderHistory('Terlewat')">Tugas Terlewat</button>
+                        </div>
+                        <div id="history-list"></div>
+                    </div>
+                </section>
+
+                <!-- HALAMAN 3: KULIAH -->
+                <section id="page-matkul" class="page-view">
+                    <header>
+                        <h1 class="brand-title">Pola<span class="brand-dot">.</span></h1>
+                        <p id="active-semester-subtitle">Semester Ini</p>
+                    </header>
+                    <div id="matkul-list"></div>
+                </section>
             </div>
-
-            <div class="calendar-grid" id="calendar-grid"></div>
-
-            <div class="upcoming-container">
-                <h2 class="section-title">Tugas Belum Selesai</h2>
-                <div id="upcoming-list"></div>
-            </div>
-
-            <div class="history-container">
-                <h2 class="section-title">Riwayat & Terlewat</h2>
-                <div class="history-tabs">
-                    <button class="tab-btn active" id="tab-tk" onclick="renderHistory('Tugas Kuliah')">Tugas Kuliah</button>
-                    <button class="tab-btn" id="tab-tb" onclick="renderHistory('Tugas')">Tugas</button>
-                    <button class="tab-btn" id="tab-terlewat" onclick="renderHistory('Terlewat')">Tugas Terlewat</button>
-                </div>
-                <div id="history-list"></div>
-            </div>
-        </section>
-
-        <!-- HALAMAN 3: KULIAH -->
-        <section id="page-matkul" class="page-view" style="display: none;">
-            <header>
-                <h1 class="brand-title">Pola<span class="brand-dot">.</span></h1>
-                <p id="active-semester-subtitle">Semester Ini</p>
-            </header>
-            <div id="matkul-list"></div>
-        </section>
+        </div>
 
         <!-- FAB DINAMIS UNTUK SEMUA HALAMAN -->
         <div class="fab-backdrop" id="fab-backdrop" onclick="closeFabMenu()"></div>

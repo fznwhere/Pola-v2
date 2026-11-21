@@ -65,6 +65,52 @@ jobs:
           '
           npx capacitor-assets generate --android
 
+      - name: Pasang Ikon Notifikasi Status Bar
+        run: |
+          mkdir -p android/app/src/main/res/drawable
+          cp assets/icons/logo.png android/app/src/main/res/drawable/ic_large_pola.png
+          node -e '
+            (async () => {
+              const fs = require("fs");
+              const sharp = require("sharp");
+
+              const cfg = JSON.parse(fs.readFileSync("capacitor.config.json", "utf8"));
+              cfg.plugins = cfg.plugins || {};
+              cfg.plugins.LocalNotifications = {
+                smallIcon: "ic_stat_pola",
+                iconColor: "#C85A32"
+              };
+              fs.writeFileSync("capacitor.config.json", JSON.stringify(cfg, null, 2));
+
+              if (fs.existsSync("assets/icons/ic_stat_pola.png")) {
+                fs.copyFileSync("assets/icons/ic_stat_pola.png", "android/app/src/main/res/drawable/ic_stat_pola.png");
+                return;
+              }
+
+              const { data, info } = await sharp("assets/icons/logo.png")
+                .ensureAlpha()
+                .raw()
+                .toBuffer({ resolveWithObject: true });
+
+              for (let i = 0; i < data.length; i += 4) {
+                const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+                const isBgCream = r > 220 && g > 220 && b > 210;
+                if (a < 50 || isBgCream) {
+                  data[i] = 0; data[i + 1] = 0; data[i + 2] = 0; data[i + 3] = 0;
+                } else {
+                  data[i] = 255; data[i + 1] = 255; data[i + 2] = 255; data[i + 3] = 255;
+                }
+              }
+
+              await sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } })
+                .trim()
+                .resize(84, 84, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+                .extend({ top: 6, bottom: 6, left: 6, right: 6, background: { r: 0, g: 0, b: 0, alpha: 0 } })
+                .png()
+                .toFile("android/app/src/main/res/drawable/ic_stat_pola.png");
+            })();
+          '
+
       - name: Tambahkan Izin Alarm & Notifikasi Android
         run: |
           node -e '

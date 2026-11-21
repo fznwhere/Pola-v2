@@ -1,5 +1,7 @@
 // notif.js - Penjadwal Alarm Native Android untuk Pola. v2
 
+const POLA_CHANNEL_ID = 'pola_jadwal_v1';
+
 function stringToInt32(str) {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -15,6 +17,21 @@ function getLocalNotificationsPlugin() {
     window.Capacitor.Plugins.LocalNotifications
     ? window.Capacitor.Plugins.LocalNotifications
     : null;
+}
+
+async function ensurePolaNotificationChannel(LocalNotifications) {
+  try {
+    await LocalNotifications.createChannel({
+      id: POLA_CHANNEL_ID,
+      name: 'Pengingat Jadwal Pola',
+      description: 'Notifikasi jadwal salat, kuliah, rutinitas, dan tugas',
+      importance: 5,
+      visibility: 1,
+      vibration: true
+    });
+  } catch (e) {
+    // Abaikan jika dijalankan di browser web biasa
+  }
 }
 
 // Ambil jadwal salat per tanggal (dengan cache agar hemat kuota & jalan offline)
@@ -144,6 +161,8 @@ async function syncAndroidAlarms() {
   const perm = await LocalNotifications.checkPermissions();
   if (perm.display !== 'granted') return;
 
+  await ensurePolaNotificationChannel(LocalNotifications);
+
   const pending = await LocalNotifications.getPending();
   if (pending.notifications && pending.notifications.length > 0) {
     await LocalNotifications.cancel({ notifications: pending.notifications });
@@ -179,6 +198,10 @@ async function syncAndroidAlarms() {
           id: stringToInt32(`${dateStr}_${item.uid}_pre5`),
           title: `⏳ 5 Menit Lagi: ${item.name}`,
           body: `Mulai pukul ${item.time}${detail} • ${item.category}`,
+          channelId: POLA_CHANNEL_ID,
+          smallIcon: 'ic_stat_pola',
+          largeIcon: 'ic_large_pola',
+          iconColor: '#C85A32',
           schedule: { at: pre5Date, allowWhileIdle: true }
         });
       }
@@ -189,6 +212,10 @@ async function syncAndroidAlarms() {
           id: stringToInt32(`${dateStr}_${item.uid}_now`),
           title: `🔔 Sekarang: ${item.name}`,
           body: `Jadwal pukul ${item.time}${detail}`,
+          channelId: POLA_CHANNEL_ID,
+          smallIcon: 'ic_stat_pola',
+          largeIcon: 'ic_large_pola',
+          iconColor: '#C85A32',
           schedule: { at: exactDate, allowWhileIdle: true }
         });
       }
@@ -214,6 +241,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const perm = await LocalNotifications.requestPermissions();
   if (perm.display === 'granted') {
+    await ensurePolaNotificationChannel(LocalNotifications);
     await syncAndroidAlarms();
   }
 });

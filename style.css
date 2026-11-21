@@ -48,7 +48,7 @@
 body { background-color: var(--bg-main); color: var(--text-main); display: flex; justify-content: center; overflow-x: hidden; }
 .app-container { width: 100%; max-width: 480px; min-height: 100vh; padding: 20px; padding-bottom: 100px; }
 
-header { text-align: center; margin-bottom: 25px; position: relative; }
+header { text-align: center; margin-bottom: 20px; position: relative; }
 
 .brand-title { font-family: var(--font-logo); font-size: 32px; font-weight: 400; margin-bottom: 5px; color: var(--text-main); letter-spacing: 0.5px; line-height: 1; }
 .brand-dot { font-family: var(--font-logo); color: var(--btn-primary); }
@@ -60,6 +60,144 @@ header { text-align: center; margin-bottom: 25px; position: relative; }
 header p { color: var(--text-muted); font-size: 14px; font-weight: 500; margin-top: -2px; }
 .section-title { font-size: 16px; font-weight: 700; margin-bottom: 12px; color: var(--text-main); }
 .svg-icon { vertical-align: text-bottom; width: 14px; height: 14px; margin-right: 4px; }
+
+/* --- BAR LOKASI & CADANGAN DI BERANDA --- */
+.beranda-utility-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 18px;
+}
+.utility-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-line);
+    border-radius: 10px;
+    padding: 7px 11px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+    max-width: 64%;
+}
+.utility-pill:active { transform: scale(0.96); }
+.utility-pill span.loc-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.utility-pill.backup-pill {
+    color: var(--text-main);
+    font-weight: 700;
+    flex-shrink: 0;
+}
+.utility-pill .spin-icon {
+    animation: spin360 0.8s linear infinite;
+}
+@keyframes spin360 {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* --- MODAL CADANGAN & PEMULIHAN JSON --- */
+.backup-stats-box {
+    background-color: var(--bg-main);
+    border: 1px solid var(--border-line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin-bottom: 12px;
+}
+.backup-stats-box strong {
+    color: var(--text-main);
+}
+.backup-btn-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 8px;
+}
+.backup-action-btn {
+    background-color: var(--bg-main);
+    color: var(--text-main);
+    border: 1px solid var(--border-line);
+    border-radius: 10px;
+    padding: 10px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    transition: transform 0.15s ease;
+}
+.backup-action-btn:active { transform: scale(0.96); }
+.backup-action-btn.primary {
+    background-color: var(--btn-primary);
+    color: #FFFFFF;
+    border-color: var(--btn-primary);
+}
+.backup-divider {
+    border: none;
+    border-top: 1px dashed var(--border-line);
+    margin: 16px 0;
+}
+.backup-textarea {
+    width: 100%;
+    min-height: 76px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    margin-top: 8px;
+    resize: vertical;
+}
+.backup-preview-box {
+    display: none;
+    background-color: rgba(74, 124, 89, 0.08);
+    border: 1px solid rgba(74, 124, 89, 0.35);
+    border-radius: 10px;
+    padding: 12px;
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--text-main);
+}
+.backup-mode-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 10px;
+}
+.backup-mode-option {
+    display: flex !important;
+    align-items: flex-start !important;
+    gap: 8px;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-line);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-top: 0 !important;
+    cursor: pointer;
+    font-size: 12px !important;
+    color: var(--text-main) !important;
+}
+.backup-mode-option input[type="radio"] {
+    width: auto !important;
+    margin-top: 2px;
+    accent-color: var(--btn-primary);
+}
+.backup-mode-option small {
+    display: block;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
 
 /* --- EFEK BLUR PROGRESIF SAAT GESER HALAMAN --- */
 .drawer-blur-backdrop {
@@ -185,7 +323,7 @@ header p { color: var(--text-muted); font-size: 14px; font-weight: 500; margin-t
     margin-top: 0;
 }
 
-/* --- BAGIAN TAMBAH DI PANEL SEMESTER --- */
+/* --- BAGIAN TAMBAH / CADANGAN DI PANEL GESER --- */
 .drawer-bottom-menu {
     margin-top: 22px;
     padding-top: 16px;
@@ -215,6 +353,7 @@ header p { color: var(--text-muted); font-size: 14px; font-weight: 500; margin-t
     display: flex;
     justify-content: center;
     align-items: center;
+    gap: 6px;
     cursor: pointer;
     transition: transform 0.15s ease;
 }

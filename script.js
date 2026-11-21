@@ -4,12 +4,45 @@ const namaHari = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'
 let currentHistoryTab = 'Tugas Kuliah';
 let currentDrawerTab = 'Rutinitas';
 let editSemesterId = null;
+let pendingBackupPayload = null;
+const fetchingHolidayYears = new Set();
 
-const liburNasional = {
-    "2026-01-01": "Tahun Baru Masehi", "2026-02-18": "Isra Mikraj", "2026-02-19": "Tahun Baru Imlek", "2026-03-20": "Hari Raya Nyepi / Idul Fitri",
-    "2026-03-21": "Idul Fitri", "2026-04-03": "Wafat Isa Al Masih", "2026-05-01": "Hari Buruh Nasional", "2026-05-14": "Kenaikan Isa Al Masih",
-    "2026-05-27": "Idul Adha", "2026-05-31": "Hari Raya Waisak", "2026-06-01": "Hari Lahir Pancasila", "2026-08-17": "Hari Kemerdekaan RI",
-    "2026-08-25": "Maulid Nabi Muhammad SAW", "2026-12-25": "Hari Raya Natal"
+// Data dasar libur nasional (cadangan offline instan)
+const defaultLiburNasional = {
+    "2026-01-01": "Tahun Baru Masehi",
+    "2026-01-16": "Isra Mikraj Nabi Muhammad SAW",
+    "2026-02-17": "Tahun Baru Imlek 2577",
+    "2026-03-19": "Hari Suci Nyepi",
+    "2026-03-20": "Hari Raya Idul Fitri 1447 H",
+    "2026-03-21": "Hari Raya Idul Fitri 1447 H",
+    "2026-04-03": "Wafat Yesus Kristus",
+    "2026-04-05": "Kebangkitan Yesus Kristus (Paskah)",
+    "2026-05-01": "Hari Buruh Internasional",
+    "2026-05-14": "Kenaikan Yesus Kristus",
+    "2026-05-27": "Hari Raya Idul Adha 1447 H",
+    "2026-05-31": "Hari Raya Waisak 2570 BE",
+    "2026-06-01": "Hari Lahir Pancasila",
+    "2026-06-16": "1 Muharam Tahun Baru Islam 1448 H",
+    "2026-08-17": "Proklamasi Kemerdekaan RI",
+    "2026-08-25": "Maulid Nabi Muhammad SAW",
+    "2026-12-25": "Kelahiran Yesus Kristus (Natal)",
+    "2027-01-01": "Tahun Baru Masehi",
+    "2027-01-05": "Isra Mikraj Nabi Muhammad SAW",
+    "2027-02-06": "Tahun Baru Imlek 2578",
+    "2027-03-09": "Hari Suci Nyepi",
+    "2027-03-10": "Hari Raya Idul Fitri 1448 H",
+    "2027-03-11": "Hari Raya Idul Fitri 1448 H",
+    "2027-03-26": "Wafat Yesus Kristus",
+    "2027-03-28": "Kebangkitan Yesus Kristus (Paskah)",
+    "2027-05-01": "Hari Buruh Internasional",
+    "2027-05-06": "Kenaikan Yesus Kristus",
+    "2027-05-17": "Hari Raya Idul Adha 1448 H",
+    "2027-05-20": "Hari Raya Waisak 2571 BE",
+    "2027-06-01": "Hari Lahir Pancasila",
+    "2027-06-06": "1 Muharam Tahun Baru Islam 1449 H",
+    "2027-08-15": "Maulid Nabi Muhammad SAW",
+    "2027-08-17": "Proklamasi Kemerdekaan RI",
+    "2027-12-25": "Kelahiran Yesus Kristus (Natal)"
 };
 
 const strk = "var(--text-muted)";
@@ -24,6 +57,40 @@ const iUsr = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${st
 const iRom = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${strk}" stroke-width="2"><path d="M3 21h18"></path><path d="M7 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"></path><path d="M15 12h.01"></path></svg>`;
 const iPls = `<svg viewBox="0 0 24 24" width="28" height="28" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
 const iDel = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${strk}" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+const iPin = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${strk}" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>`;
+const iRef = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${strk}" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>`;
+const iBkp = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="var(--text-main)" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`;
+
+// --- PEMBERSIH CACHE LAMA OTOMATIS ---
+function cleanupOldCache() {
+    const now = new Date();
+    const curYear = now.getFullYear();
+    const curMonth = now.getMonth() + 1;
+    const minYm = curYear * 12 + curMonth - 1; // Simpan maksimal 1 bulan ke belakang
+
+    Object.keys(localStorage).forEach((key) => {
+        // Hapus format cache harian lama
+        if (key.startsWith('nalaSalat_')) {
+            localStorage.removeItem(key);
+        }
+        // Hapus cache bulanan salat yang sudah lewat > 1 bulan
+        if (key.startsWith('nalaSalatMonth_')) {
+            const parts = key.split('_');
+            const y = parseInt(parts[1], 10);
+            const m = parseInt(parts[2], 10);
+            if (!isNaN(y) && !isNaN(m) && (y * 12 + m) < minYm) {
+                localStorage.removeItem(key);
+            }
+        }
+        // Hapus cache libur nasional > 1 tahun ke belakang
+        if (key.startsWith('nalaAutoLibur_')) {
+            const y = parseInt(key.split('_')[1], 10);
+            if (!isNaN(y) && y < curYear - 1) {
+                localStorage.removeItem(key);
+            }
+        }
+    });
+}
 
 // --- CUSTOM DIALOG BERTEMA POLA ---
 function ensurePolaDialogExists() {
@@ -80,45 +147,248 @@ function polaConfirm(message, title = 'Konfirmasi', confirmLabel = 'Ya, Lanjutka
     });
 }
 
-// --- LOKASI USER & JADWAL SALAT DINAMIS ---
-function getSavedCoordinates() {
-    const saved = JSON.parse(localStorage.getItem('nalaUserLocation'));
-    if (saved && typeof saved.lat === 'number' && typeof saved.lng === 'number') {
-        return saved;
-    }
-    return { lat: -7.7956, lng: 110.3695, isFallback: true };
+// --- JADWAL LIBUR NASIONAL OTOMATIS ---
+function getAutoHolidaysMapForYear(year) {
+    const result = {};
+    const prefix = `${year}-`;
+    Object.keys(defaultLiburNasional).forEach((d) => {
+        if (d.startsWith(prefix)) result[d] = defaultLiburNasional[d];
+    });
+    try {
+        const cached = JSON.parse(localStorage.getItem(`nalaAutoLibur_${year}`));
+        if (cached && cached.holidays && typeof cached.holidays === 'object') {
+            Object.assign(result, cached.holidays);
+        }
+    } catch (e) {}
+    return result;
 }
 
-function refreshUserCoordinates() {
+function getAutoHolidayName(dateStr) {
+    if (!dateStr) return null;
+    const year = parseInt(dateStr.slice(0, 4), 10);
+    if (isNaN(year)) return null;
+    const map = getAutoHolidaysMapForYear(year);
+    return map[dateStr] || null;
+}
+
+function isUserHoliday(dateStr) {
+    let savedLibur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
+    let tDate = new Date(dateStr); tDate.setHours(0, 0, 0, 0);
+    for (let l of savedLibur) {
+        let sDate = new Date(l.startDate); sDate.setHours(0, 0, 0, 0);
+        let eDate = new Date(l.endDate || l.startDate); eDate.setHours(0, 0, 0, 0);
+        if (tDate >= sDate && tDate <= eDate) return l.name;
+    }
+    return null;
+}
+
+function getHolidayInfo(dateStr) {
+    const userHol = isUserHoliday(dateStr);
+    const autoHol = getAutoHolidayName(dateStr);
+    if (userHol && autoHol && userHol.toLowerCase() !== autoHol.toLowerCase()) {
+        return `${autoHol} • ${userHol}`;
+    }
+    return userHol || autoHol || null;
+}
+
+async function ensureAutoHolidaysForYear(year) {
+    if (!year || fetchingHolidayYears.has(year)) return;
+    const cacheKey = `nalaAutoLibur_${year}`;
+    try {
+        const cached = JSON.parse(localStorage.getItem(cacheKey));
+        // Cache berlaku 30 hari agar perubahan SKB cuti bersama tetap terpantau
+        if (cached && cached.updatedAt && (Date.now() - cached.updatedAt) < 30 * 24 * 60 * 60 * 1000) {
+            return;
+        }
+    } catch (e) {}
+
+    fetchingHolidayYears.add(year);
+    const parsedMap = {};
+
+    try {
+        // Sumber 1: API Hari Libur Indonesia
+        let loaded = false;
+        try {
+            const res = await fetch(`https://api-harilibur.vercel.app/api?year=${year}`);
+            if (res.ok) {
+                const data = await res.json();
+                if (Array.isArray(data) && data.length > 0) {
+                    data.forEach((item) => {
+                        if (item.is_national_holiday && item.holiday_date && item.holiday_name) {
+                            const parts = item.holiday_date.split('-');
+                            if (parts.length === 3) {
+                                const normDate = `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+                                parsedMap[normDate] = item.holiday_name;
+                            }
+                        }
+                    });
+                    loaded = Object.keys(parsedMap).length > 0;
+                }
+            }
+        } catch (e) {}
+
+        // Sumber 2: Dayoff API Indonesia
+        if (!loaded) {
+            try {
+                const res2 = await fetch(`https://dayoffapi.vercel.app/api?year=${year}`);
+                if (res2.ok) {
+                    const data2 = await res2.json();
+                    if (Array.isArray(data2) && data2.length > 0) {
+                        data2.forEach((item) => {
+                            if (!item.is_cuti && item.tanggal && item.keterangan) {
+                                const parts = item.tanggal.split('-');
+                                if (parts.length === 3) {
+                                    const normDate = `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+                                    parsedMap[normDate] = item.keterangan;
+                                }
+                            }
+                        });
+                        loaded = Object.keys(parsedMap).length > 0;
+                    }
+                }
+            } catch (e) {}
+        }
+
+        // Sumber 3: Nager.Date Public Holidays ID
+        if (!loaded) {
+            try {
+                const res3 = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${year}/ID`);
+                if (res3.ok) {
+                    const data3 = await res3.json();
+                    if (Array.isArray(data3) && data3.length > 0) {
+                        data3.forEach((item) => {
+                            if (item.date && (item.localName || item.name)) {
+                                parsedMap[item.date] = item.localName || item.name;
+                            }
+                        });
+                        loaded = Object.keys(parsedMap).length > 0;
+                    }
+                }
+            } catch (e) {}
+        }
+
+        if (loaded) {
+            localStorage.setItem(cacheKey, JSON.stringify({ updatedAt: Date.now(), holidays: parsedMap }));
+            refreshAllViews();
+        }
+    } finally {
+        fetchingHolidayYears.delete(year);
+    }
+}
+
+// --- LOKASI USER & JADWAL SALAT KEMENAG RI (BULANAN + OFFLINE) ---
+function getSavedCoordinates() {
+    try {
+        const saved = JSON.parse(localStorage.getItem('nalaUserLocation'));
+        if (saved && typeof saved.lat === 'number' && typeof saved.lng === 'number') {
+            return saved;
+        }
+    } catch (e) {}
+    return { lat: -7.7956, lng: 110.3695, city: 'Yogyakarta', isFallback: true };
+}
+
+function updateLocationPillUI(statusText = null, spinning = false) {
+    const locEl = document.getElementById('beranda-loc-text');
+    const iconEl = document.getElementById('beranda-loc-icon');
+    if (iconEl) {
+        iconEl.innerHTML = spinning ? iRef : iPin;
+        const svg = iconEl.querySelector('svg');
+        if (svg) svg.classList.toggle('spin-icon', spinning);
+    }
+    if (!locEl) return;
+    if (statusText) {
+        locEl.innerText = statusText;
+        return;
+    }
+    const loc = getSavedCoordinates();
+    if (loc.city) {
+        locEl.innerText = loc.isFallback ? `${loc.city} (Default)` : loc.city;
+    } else {
+        locEl.innerText = `${loc.lat.toFixed(2)}, ${loc.lng.toFixed(2)}`;
+    }
+}
+
+async function resolveCityName(lat, lng) {
+    try {
+        const res = await fetch(
+            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=id`
+        );
+        if (res.ok) {
+            const data = await res.json();
+            const city = data.city || data.locality || data.principalSubdivision || '';
+            if (city) return city.replace(/^Kota\s+|^Kabupaten\s+/i, '').trim();
+        }
+    } catch (e) {}
+    return '';
+}
+
+function refreshUserCoordinates(manual = false) {
     return new Promise((resolve) => {
         const current = getSavedCoordinates();
         if (!navigator.geolocation) {
+            if (manual) polaAlert('Perangkat atau browser ini tidak mendukung deteksi lokasi otomatis.');
             resolve(current);
             return;
         }
+
+        if (manual) updateLocationPillUI('Mencari lokasi...', true);
+
         navigator.geolocation.getCurrentPosition(
-            (pos) => {
+            async (pos) => {
                 const lat = Number(pos.coords.latitude.toFixed(4));
                 const lng = Number(pos.coords.longitude.toFixed(4));
                 const movedFar =
                     current.isFallback ||
-                    Math.abs(lat - current.lat) > 0.15 ||
-                    Math.abs(lng - current.lng) > 0.15;
+                    Math.abs(lat - current.lat) > 0.12 ||
+                    Math.abs(lng - current.lng) > 0.12;
 
-                const updated = { lat, lng, isFallback: false, updatedAt: Date.now() };
+                let cityName = (!movedFar && current.city) ? current.city : '';
+                if (!cityName || manual) {
+                    const resolved = await resolveCityName(lat, lng);
+                    if (resolved) cityName = resolved;
+                }
+
+                const updated = {
+                    lat,
+                    lng,
+                    city: cityName || current.city || 'Lokasi Terdeteksi',
+                    isFallback: false,
+                    updatedAt: Date.now()
+                };
                 localStorage.setItem('nalaUserLocation', JSON.stringify(updated));
+                updateLocationPillUI(null, false);
 
-                if (movedFar) {
+                if (movedFar || manual) {
                     Object.keys(localStorage).forEach((k) => {
-                        if (k.startsWith('nalaSalat_')) localStorage.removeItem(k);
+                        if (k.startsWith('nalaSalatMonth_') || k.startsWith('nalaSalat_')) {
+                            localStorage.removeItem(k);
+                        }
                     });
-                    if (document.getElementById('schedule-list')) loadTodaySchedule();
+                    if (document.getElementById('schedule-list')) await loadTodaySchedule();
                     if (typeof syncAndroidAlarms === 'function') syncAndroidAlarms();
                 }
                 resolve(updated);
             },
-            () => resolve(current),
-            { enableHighAccuracy: false, timeout: 6000, maximumAge: 30 * 60 * 1000 }
+            async () => {
+                // Jika koordinat tersimpan belum punya nama kota, coba ambil nama kotanya
+                if (!current.city) {
+                    const resolved = await resolveCityName(current.lat, current.lng);
+                    if (resolved) {
+                        current.city = resolved;
+                        localStorage.setItem('nalaUserLocation', JSON.stringify(current));
+                    }
+                }
+                updateLocationPillUI(null, false);
+                if (manual) {
+                    await polaAlert('Gagal mendeteksi lokasi baru. Pastikan GPS dan izin lokasi untuk aplikasi Pola. sudah aktif.');
+                }
+                resolve(current);
+            },
+            {
+                enableHighAccuracy: manual,
+                timeout: manual ? 10000 : 6000,
+                maximumAge: manual ? 0 : 30 * 60 * 1000
+            }
         );
     });
 }
@@ -126,39 +396,77 @@ function refreshUserCoordinates() {
 async function fetchSalatTimingsForDate(dateObj, dateStr) {
     const loc = getSavedCoordinates();
     const locKey = `${loc.lat.toFixed(2)}_${loc.lng.toFixed(2)}`;
-    const cacheKey = `nalaSalat_${dateStr}_${locKey}`;
-    const cached = JSON.parse(localStorage.getItem(cacheKey));
-    if (cached && Array.isArray(cached) && cached.length === 5) {
-        return cached;
-    }
-
-    const dd = String(dateObj.getDate()).padStart(2, '0');
-    const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
     const yyyy = dateObj.getFullYear();
+    const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const dd = String(dateObj.getDate()).padStart(2, '0');
 
+    const monthCacheKey = `nalaSalatMonth_${yyyy}_${mm}_${locKey}`;
+    try {
+        const cachedMonth = JSON.parse(localStorage.getItem(monthCacheKey));
+        if (cachedMonth && Array.isArray(cachedMonth[dateStr]) && cachedMonth[dateStr].length === 5) {
+            return cachedMonth[dateStr];
+        }
+    } catch (e) {}
+
+    // Ambil jadwal salat 1 bulan penuh standar Kemenag RI (method=20)
     try {
         const res = await fetch(
-            `https://api.aladhan.com/v1/timings/${dd}-${mm}-${yyyy}?latitude=${loc.lat}&longitude=${loc.lng}&method=11`
+            `https://api.aladhan.com/v1/calendar/${yyyy}/${Number(mm)}?latitude=${loc.lat}&longitude=${loc.lng}&method=20`
         );
-        const t = (await res.json()).data.timings;
-        const result = [
-            { name: 'Subuh', time: t.Fajr.slice(0, 5) },
-            { name: 'Zuhur', time: t.Dhuhr.slice(0, 5) },
-            { name: 'Asar', time: t.Asr.slice(0, 5) },
-            { name: 'Maghrib', time: t.Maghrib.slice(0, 5) },
-            { name: 'Isya', time: t.Isha.slice(0, 5) }
-        ];
-        localStorage.setItem(cacheKey, JSON.stringify(result));
-        return result;
-    } catch (e) {
-        return [
-            { name: 'Subuh', time: '04:30' },
-            { name: 'Zuhur', time: '11:45' },
-            { name: 'Asar', time: '15:00' },
-            { name: 'Maghrib', time: '17:45' },
-            { name: 'Isya', time: '19:00' }
-        ];
-    }
+        if (res.ok) {
+            const json = await res.json();
+            if (json && Array.isArray(json.data)) {
+                const monthMap = {};
+                json.data.forEach((dayItem) => {
+                    const gDate = dayItem?.date?.gregorian?.date; // format DD-MM-YYYY
+                    const t = dayItem?.timings;
+                    if (gDate && t) {
+                        const p = gDate.split('-');
+                        if (p.length === 3) {
+                            const isoKey = `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
+                            monthMap[isoKey] = [
+                                { name: 'Subuh', time: t.Fajr.slice(0, 5) },
+                                { name: 'Zuhur', time: t.Dhuhr.slice(0, 5) },
+                                { name: 'Asar', time: t.Asr.slice(0, 5) },
+                                { name: 'Maghrib', time: t.Maghrib.slice(0, 5) },
+                                { name: 'Isya', time: t.Isha.slice(0, 5) }
+                            ];
+                        }
+                    }
+                });
+                if (monthMap[dateStr]) {
+                    localStorage.setItem(monthCacheKey, JSON.stringify(monthMap));
+                    cleanupOldCache();
+                    return monthMap[dateStr];
+                }
+            }
+        }
+    } catch (e) {}
+
+    // Cadangan endpoint harian jika kalender bulanan gagal
+    try {
+        const resSingle = await fetch(
+            `https://api.aladhan.com/v1/timings/${dd}-${mm}-${yyyy}?latitude=${loc.lat}&longitude=${loc.lng}&method=20`
+        );
+        if (resSingle.ok) {
+            const t = (await resSingle.json()).data.timings;
+            return [
+                { name: 'Subuh', time: t.Fajr.slice(0, 5) },
+                { name: 'Zuhur', time: t.Dhuhr.slice(0, 5) },
+                { name: 'Asar', time: t.Asr.slice(0, 5) },
+                { name: 'Maghrib', time: t.Maghrib.slice(0, 5) },
+                { name: 'Isya', time: t.Isha.slice(0, 5) }
+            ];
+        }
+    } catch (e) {}
+
+    return [
+        { name: 'Subuh', time: '04:15' },
+        { name: 'Zuhur', time: '11:40' },
+        { name: 'Asar', time: '15:00' },
+        { name: 'Maghrib', time: '17:45' },
+        { name: 'Isya', time: '18:55' }
+    ];
 }
 
 // --- MANAJEMEN SEMESTER KULIAH ---
@@ -211,6 +519,460 @@ function getActiveMatkulList() {
 function setActiveSemester(semId) {
     localStorage.setItem('nalaActiveSemesterId', semId);
     refreshAllViews();
+}
+
+// --- EKSPOR & IMPOR JSON ANTI-GAGAL ---
+function buildBackupObject() {
+    const { semesters, activeId } = ensureSemesterInitialized();
+    const matkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
+    const overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
+    const tasks = JSON.parse(localStorage.getItem('nalaTasks')) || [];
+    const routines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
+    const libur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
+    const dismissed = JSON.parse(localStorage.getItem('nalaDismissed')) || [];
+    const userLocation = JSON.parse(localStorage.getItem('nalaUserLocation')) || null;
+
+    return {
+        app: 'Pola.',
+        schemaVersion: 2,
+        exportedAt: new Date().toISOString(),
+        summary: {
+            semesters: semesters.length,
+            matkul: matkul.length,
+            tasks: tasks.length,
+            routines: routines.length,
+            libur: libur.length,
+            overrides: overrides.length
+        },
+        data: {
+            nalaSemesters: semesters,
+            nalaActiveSemesterId: activeId,
+            nalaMatkul: matkul,
+            nalaOverrides: overrides,
+            nalaTasks: tasks,
+            nalaRoutines: routines,
+            nalaLibur: libur,
+            nalaDismissed: dismissed,
+            nalaUserLocation: userLocation
+        }
+    };
+}
+
+function validateAndNormalizeBackup(rawInput) {
+    let parsed = rawInput;
+    if (typeof rawInput === 'string') {
+        const trimmed = rawInput.trim();
+        if (!trimmed) return { ok: false, error: 'Teks cadangan masih kosong.' };
+        try {
+            parsed = JSON.parse(trimmed);
+        } catch (e) {
+            return { ok: false, error: 'Format file/kode bukan JSON yang valid.' };
+        }
+    }
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return { ok: false, error: 'Struktur data cadangan tidak dikenali.' };
+    }
+
+    const src = (parsed.data && typeof parsed.data === 'object') ? parsed.data : parsed;
+    const knownKeys = ['nalaSemesters', 'nalaMatkul', 'nalaOverrides', 'nalaTasks', 'nalaRoutines', 'nalaLibur', 'nalaDismissed'];
+    const hasKnownKey = knownKeys.some((k) => Array.isArray(src[k]));
+
+    if (!hasKnownKey) {
+        return { ok: false, error: 'File ini bukan cadangan data aplikasi Pola.' };
+    }
+
+    // Normalisasi Semester (Backward-Compatible)
+    let semesters = Array.isArray(src.nalaSemesters)
+        ? src.nalaSemesters
+            .filter((s) => s && typeof s === 'object' && s.name)
+            .map((s, idx) => ({
+                id: String(s.id || `sem_${Date.now()}_${idx}`),
+                name: String(s.name),
+                createdAt: s.createdAt || Date.now()
+            }))
+        : [];
+
+    if (semesters.length === 0) {
+        semesters = [{ id: 'sem_1', name: 'Semester 1', createdAt: Date.now() }];
+    }
+    const validSemIds = new Set(semesters.map((s) => s.id));
+    const defaultSemId = validSemIds.has(src.nalaActiveSemesterId) ? src.nalaActiveSemesterId : semesters[0].id;
+
+    // Normalisasi Matkul
+    const matkul = Array.isArray(src.nalaMatkul)
+        ? src.nalaMatkul
+            .filter((m) => m && typeof m === 'object' && m.name && m.hari && m.jamMulai)
+            .map((m, idx) => ({
+                id: m.id || (Date.now() + idx),
+                semesterId: validSemIds.has(m.semesterId) ? m.semesterId : defaultSemId,
+                name: String(m.name),
+                hari: String(m.hari),
+                jamMulai: String(m.jamMulai),
+                jamSelesai: m.jamSelesai ? String(m.jamSelesai) : '',
+                dosen: m.dosen ? String(m.dosen) : '',
+                ruangan: m.ruangan ? String(m.ruangan) : '',
+                remindVal: (typeof m.remindVal === 'number' && m.remindVal > 0) ? m.remindVal : null,
+                remindUnit: m.remindUnit === 'hours' ? 'hours' : 'minutes'
+            }))
+        : [];
+
+    // Normalisasi Tugas & Acara
+    const tasks = Array.isArray(src.nalaTasks)
+        ? src.nalaTasks
+            .filter((t) => t && typeof t === 'object' && t.name && t.date && t.time)
+            .map((t, idx) => {
+                const cat = t.category ? String(t.category) : 'Tugas';
+                const item = {
+                    id: t.id || (Date.now() + 1000 + idx),
+                    name: String(t.name),
+                    date: String(t.date),
+                    time: String(t.time),
+                    category: cat,
+                    status: t.status === 'done' ? 'done' : 'pending',
+                    deskripsi: t.deskripsi ? String(t.deskripsi) : '',
+                    color: t.color ? String(t.color) : (cat === 'Acara' ? 'var(--color-acara)' : 'var(--color-tugas)'),
+                    remindVal: (typeof t.remindVal === 'number' && t.remindVal > 0) ? t.remindVal : null,
+                    remindUnit: t.remindUnit === 'hours' ? 'hours' : 'minutes'
+                };
+                if (t.matkulId) item.matkulId = String(t.matkulId);
+                if (t.pengumpulan) item.pengumpulan = String(t.pengumpulan);
+                if (t.endDate) item.endDate = String(t.endDate);
+                else if (cat === 'Acara') item.endDate = String(t.date);
+                if (t.endTime) item.endTime = String(t.endTime);
+                if (t.ruang) item.ruang = String(t.ruang);
+                return item;
+            })
+        : [];
+
+    // Normalisasi Rutinitas
+    const routines = Array.isArray(src.nalaRoutines)
+        ? src.nalaRoutines
+            .filter((r) => r && typeof r === 'object' && r.name && r.time && Array.isArray(r.days))
+            .map((r, idx) => ({
+                id: r.id || (Date.now() + 2000 + idx),
+                name: String(r.name),
+                time: String(r.time),
+                days: r.days.map(String),
+                color: r.color ? String(r.color) : 'var(--color-rutin)',
+                desc: r.desc ? String(r.desc) : '',
+                remindVal: (typeof r.remindVal === 'number' && r.remindVal > 0) ? r.remindVal : null,
+                remindUnit: r.remindUnit === 'hours' ? 'hours' : 'minutes'
+            }))
+        : [];
+
+    // Normalisasi Libur Pribadi
+    const libur = Array.isArray(src.nalaLibur)
+        ? src.nalaLibur
+            .filter((l) => l && typeof l === 'object' && l.name && l.startDate)
+            .map((l, idx) => ({
+                id: l.id || (Date.now() + 3000 + idx),
+                name: String(l.name),
+                startDate: String(l.startDate),
+                endDate: l.endDate ? String(l.endDate) : String(l.startDate)
+            }))
+        : [];
+
+    // Normalisasi Overrides Kuliah
+    const overrides = Array.isArray(src.nalaOverrides)
+        ? src.nalaOverrides
+            .filter((o) => o && typeof o === 'object' && o.matkulId && o.newDate && o.newTime)
+            .map((o) => ({
+                matkulId: o.matkulId,
+                originalDate: o.originalDate ? String(o.originalDate) : '',
+                newDate: String(o.newDate),
+                newTime: String(o.newTime),
+                newEndTime: o.newEndTime !== undefined ? String(o.newEndTime) : '',
+                newRuangan: o.newRuangan ? String(o.newRuangan) : '',
+                newDosen: o.newDosen ? String(o.newDosen) : '',
+                remindVal: (typeof o.remindVal === 'number' && o.remindVal > 0) ? o.remindVal : null,
+                remindUnit: o.remindUnit === 'hours' ? 'hours' : 'minutes'
+            }))
+        : [];
+
+    const dismissed = Array.isArray(src.nalaDismissed) ? src.nalaDismissed.map(String) : [];
+    const userLocation = (src.nalaUserLocation && typeof src.nalaUserLocation.lat === 'number' && typeof src.nalaUserLocation.lng === 'number')
+        ? src.nalaUserLocation
+        : null;
+
+    return {
+        ok: true,
+        normalized: {
+            nalaSemesters: semesters,
+            nalaActiveSemesterId: defaultSemId,
+            nalaMatkul: matkul,
+            nalaOverrides: overrides,
+            nalaTasks: tasks,
+            nalaRoutines: routines,
+            nalaLibur: libur,
+            nalaDismissed: dismissed,
+            nalaUserLocation: userLocation
+        }
+    };
+}
+
+function openBackupModal() {
+    closeSideDrawer();
+    ensureBackupModalExists();
+    pendingBackupPayload = null;
+
+    const current = buildBackupObject().summary;
+    const statsEl = document.getElementById('backup-current-stats');
+    if (statsEl) {
+        statsEl.innerHTML = `Data aktif saat ini: <strong>${current.semesters}</strong> Semester, <strong>${current.matkul}</strong> Matkul, <strong>${current.tasks}</strong> Tugas/Acara, <strong>${current.routines}</strong> Rutinitas, <strong>${current.libur}</strong> Libur.`;
+    }
+
+    const fileInput = document.getElementById('backup-file-input');
+    const textInput = document.getElementById('backup-paste-input');
+    const previewBox = document.getElementById('backup-preview-box');
+    if (fileInput) fileInput.value = '';
+    if (textInput) textInput.value = '';
+    if (previewBox) previewBox.style.display = 'none';
+
+    hideFabForModal();
+    document.getElementById('backup-modal').style.display = 'flex';
+}
+
+function ensureBackupModalExists() {
+    if (document.getElementById('backup-modal')) return;
+    const modal = document.createElement('div');
+    modal.id = 'backup-modal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal">
+            <h2>Cadangkan & Pulihkan</h2>
+            <div class="backup-stats-box" id="backup-current-stats"></div>
+
+            <label style="margin-top:4px;">1. Ekspor Data (Sebelum Update / Hapus Aplikasi)</label>
+            <div class="backup-btn-grid">
+                <button type="button" class="backup-action-btn primary" onclick="exportBackupFile()">Unduh File .json</button>
+                <button type="button" class="backup-action-btn" onclick="copyBackupToClipboard()">Salin Kode</button>
+            </div>
+            <small class="field-hint">Jika tombol unduh diblokir oleh HP, gunakan <strong>Salin Kode</strong> lalu simpan di catatan atau Google Keep.</small>
+
+            <hr class="backup-divider">
+
+            <label style="margin-top:0;">2. Impor Data dari Cadangan</label>
+            <input type="file" id="backup-file-input" accept=".json,application/json,text/plain" style="display:none;" onchange="handleBackupFileSelected(event)">
+            <div class="backup-btn-grid">
+                <button type="button" class="backup-action-btn" onclick="document.getElementById('backup-file-input').click()">Pilih File .json</button>
+                <button type="button" class="backup-action-btn" onclick="previewPastedBackup()">Cek Kode Tempel</button>
+            </div>
+            <textarea id="backup-paste-input" class="backup-textarea" placeholder="Atau tempel (paste) kode cadangan JSON di sini..."></textarea>
+
+            <div class="backup-preview-box" id="backup-preview-box">
+                <div id="backup-preview-summary" style="font-weight:700; line-height:1.45;"></div>
+                <div class="backup-mode-group">
+                    <label class="backup-mode-option">
+                        <input type="radio" name="backup-import-mode" value="replace" checked>
+                        <div>
+                            <strong>Timpa Semua Data</strong>
+                            <small>Cocok saat baru install ulang atau pindah HP.</small>
+                        </div>
+                    </label>
+                    <label class="backup-mode-option">
+                        <input type="radio" name="backup-import-mode" value="merge">
+                        <div>
+                            <strong>Gabungkan dengan Data Sekarang</strong>
+                            <small>Menambahkan isi cadangan tanpa menghapus jadwal aktif.</small>
+                        </div>
+                    </label>
+                </div>
+                <button type="button" class="backup-action-btn primary" style="width:100%; margin-top:10px;" onclick="executeBackupImport()">Pulihkan Data Sekarang</button>
+            </div>
+
+            <div class="modal-btns">
+                <button type="button" class="btn-cancel" onclick="closeModal('backup-modal')">Tutup</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+async function exportBackupFile() {
+    const payload = buildBackupObject();
+    const jsonString = JSON.stringify(payload, null, 2);
+    const today = new Date();
+    const dateStamp = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const filename = `pola-backup-${dateStamp}.json`;
+
+    try {
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1500);
+        await polaAlert(`File "${filename}" mulai diunduh. Jika tidak muncul di folder Download HP, gunakan tombol "Salin Kode" sebagai cadangan teks.`, 'Ekspor Berhasil');
+    } catch (e) {
+        await polaAlert('Unduhan langsung tidak didukung di tampilan ini. Gunakan tombol "Salin Kode" di sebelahnya.', 'Gunakan Salin Kode');
+    }
+}
+
+async function copyBackupToClipboard() {
+    const jsonString = JSON.stringify(buildBackupObject());
+    let copied = false;
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+            await navigator.clipboard.writeText(jsonString);
+            copied = true;
+        } catch (e) {}
+    }
+
+    if (!copied) {
+        const ta = document.createElement('textarea');
+        ta.value = jsonString;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        try {
+            copied = document.execCommand('copy');
+        } catch (e) {}
+        document.body.removeChild(ta);
+    }
+
+    if (copied) {
+        await polaAlert('Kode cadangan berhasil disalin ke clipboard! Simpan kode tersebut di aplikasi catatan sebelum menghapus aplikasi lama.', 'Tersalin');
+    } else {
+        await polaAlert('Gagal menyalin otomatis. Silakan gunakan tombol Unduh File .json.', 'Gagal Menyalin');
+    }
+}
+
+async function handleBackupFileSelected(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        const content = e.target.result;
+        const textInput = document.getElementById('backup-paste-input');
+        if (textInput) textInput.value = content;
+        await showBackupValidationPreview(content);
+    };
+    reader.onerror = async () => {
+        await polaAlert('Gagal membaca file yang dipilih.');
+    };
+    reader.readAsText(file);
+}
+
+async function previewPastedBackup() {
+    const textInput = document.getElementById('backup-paste-input');
+    const raw = textInput ? textInput.value : '';
+    await showBackupValidationPreview(raw);
+}
+
+async function showBackupValidationPreview(rawText) {
+    const res = validateAndNormalizeBackup(rawText);
+    const previewBox = document.getElementById('backup-preview-box');
+    if (!res.ok) {
+        pendingBackupPayload = null;
+        if (previewBox) previewBox.style.display = 'none';
+        await polaAlert(res.error, 'Cadangan Tidak Valid');
+        return;
+    }
+
+    pendingBackupPayload = res.normalized;
+    const d = res.normalized;
+    const summaryEl = document.getElementById('backup-preview-summary');
+    if (summaryEl) {
+        summaryEl.innerHTML = `Cadangan valid ditemukan:<br>${d.nalaSemesters.length} Semester • ${d.nalaMatkul.length} Matkul • ${d.nalaTasks.length} Tugas/Acara • ${d.nalaRoutines.length} Rutinitas • ${d.nalaLibur.length} Libur`;
+    }
+    if (previewBox) previewBox.style.display = 'block';
+}
+
+async function executeBackupImport() {
+    if (!pendingBackupPayload) {
+        await polaAlert('Pilih file .json atau tempel kode cadangan yang valid terlebih dahulu.');
+        return;
+    }
+
+    const modeEl = document.querySelector('input[name="backup-import-mode"]:checked');
+    const mode = modeEl ? modeEl.value : 'replace';
+    const incoming = pendingBackupPayload;
+
+    if (mode === 'replace') {
+        const ok = await polaConfirm('Seluruh data saat ini akan diganti dengan isi cadangan. Lanjutkan?', 'Timpa Data', 'Ya, Pulihkan');
+        if (!ok) return;
+
+        localStorage.setItem('nalaSemesters', JSON.stringify(incoming.nalaSemesters));
+        localStorage.setItem('nalaActiveSemesterId', incoming.nalaActiveSemesterId);
+        localStorage.setItem('nalaMatkul', JSON.stringify(incoming.nalaMatkul));
+        localStorage.setItem('nalaOverrides', JSON.stringify(incoming.nalaOverrides));
+        localStorage.setItem('nalaTasks', JSON.stringify(incoming.nalaTasks));
+        localStorage.setItem('nalaRoutines', JSON.stringify(incoming.nalaRoutines));
+        localStorage.setItem('nalaLibur', JSON.stringify(incoming.nalaLibur));
+        localStorage.setItem('nalaDismissed', JSON.stringify(incoming.nalaDismissed));
+        if (incoming.nalaUserLocation) {
+            localStorage.setItem('nalaUserLocation', JSON.stringify(incoming.nalaUserLocation));
+        }
+    } else {
+        // Mode Gabung (Merge tanpa menimpa ID yang sudah ada)
+        const curSem = ensureSemesterInitialized().semesters;
+        const semIdMap = {};
+        incoming.nalaSemesters.forEach((s, idx) => {
+            const sameName = curSem.find((cs) => cs.name.trim().toLowerCase() === s.name.trim().toLowerCase());
+            if (sameName) {
+                semIdMap[s.id] = sameName.id;
+            } else {
+                const newSemId = curSem.some((cs) => cs.id === s.id) ? `sem_${Date.now()}_${idx}` : s.id;
+                semIdMap[s.id] = newSemId;
+                curSem.push({ ...s, id: newSemId });
+            }
+        });
+        localStorage.setItem('nalaSemesters', JSON.stringify(curSem));
+
+        const mergeById = (existingArr, incomingArr, mapper = (x) => x) => {
+            const seen = new Set(existingArr.map((item) => String(item.id)));
+            const merged = [...existingArr];
+            incomingArr.forEach((rawItem, idx) => {
+                const item = mapper(rawItem);
+                if (!seen.has(String(item.id))) {
+                    seen.add(String(item.id));
+                    merged.push(item);
+                } else {
+                    const newId = Date.now() + idx + Math.floor(Math.random() * 1000);
+                    seen.add(String(newId));
+                    merged.push({ ...item, id: newId });
+                }
+            });
+            return merged;
+        };
+
+        const curMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
+        const mergedMatkul = mergeById(curMatkul, incoming.nalaMatkul, (m) => ({
+            ...m,
+            semesterId: semIdMap[m.semesterId] || getActiveSemesterId()
+        }));
+        localStorage.setItem('nalaMatkul', JSON.stringify(mergedMatkul));
+
+        const curTasks = JSON.parse(localStorage.getItem('nalaTasks')) || [];
+        localStorage.setItem('nalaTasks', JSON.stringify(mergeById(curTasks, incoming.nalaTasks)));
+
+        const curRoutines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
+        localStorage.setItem('nalaRoutines', JSON.stringify(mergeById(curRoutines, incoming.nalaRoutines)));
+
+        const curLibur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
+        localStorage.setItem('nalaLibur', JSON.stringify(mergeById(curLibur, incoming.nalaLibur)));
+
+        const curOverrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
+        localStorage.setItem('nalaOverrides', JSON.stringify([...curOverrides, ...incoming.nalaOverrides]));
+
+        const curDismissed = JSON.parse(localStorage.getItem('nalaDismissed')) || [];
+        localStorage.setItem('nalaDismissed', JSON.stringify([...new Set([...curDismissed, ...incoming.nalaDismissed])]));
+    }
+
+    pendingBackupPayload = null;
+    closeModal('backup-modal');
+    updateLocationPillUI(null, false);
+    refreshAllViews();
+    if (typeof syncAndroidAlarms === 'function') syncAndroidAlarms();
+
+    await polaAlert('Seluruh jadwal dan pengaturan berhasil dipulihkan!', 'Pemulihan Selesai');
 }
 
 function getFabContainer() {
@@ -300,7 +1062,8 @@ function closeSideDrawer() {
     drawer.setAttribute('aria-hidden', 'true');
     finalizeDrawerBlur(false);
     const insertModal = document.getElementById('insert-modal');
-    if (!insertModal || insertModal.style.display !== 'flex') {
+    const backupModal = document.getElementById('backup-modal');
+    if ((!insertModal || insertModal.style.display !== 'flex') && (!backupModal || backupModal.style.display !== 'flex')) {
         showFabAfterModal();
     }
 }
@@ -326,6 +1089,15 @@ function updateDrawerOptionCounts() {
     if (document.getElementById('dcount-libur')) document.getElementById('dcount-libur').innerText = libur.length;
 }
 
+function buildDrawerBackupFooterHtml() {
+    return `
+        <div class="drawer-bottom-menu">
+            <span class="drawer-menu-heading">Cadangan Data</span>
+            <button type="button" class="drawer-option-btn primary-action" onclick="openBackupModal()">${iBkp} Ekspor / Impor JSON</button>
+        </div>
+    `;
+}
+
 function renderSideDrawerContent() {
     const container = document.getElementById('drawer-content-list');
     const labelEl = document.getElementById('drawer-section-label');
@@ -340,7 +1112,7 @@ function renderSideDrawerContent() {
         if (labelEl) labelEl.innerText = 'Rutinitas';
         const routines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
         if (routines.length === 0) {
-            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada rutinitas.</p>';
+            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada rutinitas.</p>' + buildDrawerBackupFooterHtml();
             return;
         }
         let html = '<div class="drawer-sub-heading">Jadwal Rutin Aktif</div>';
@@ -366,7 +1138,7 @@ function renderSideDrawerContent() {
                     </div>
                 </div>`;
         });
-        container.innerHTML = html;
+        container.innerHTML = html + buildDrawerBackupFooterHtml();
     } else if (currentDrawerTab === 'Acara') {
         if (labelEl) labelEl.innerText = 'Acara';
         const tasks = JSON.parse(localStorage.getItem('nalaTasks')) || [];
@@ -387,7 +1159,7 @@ function renderSideDrawerContent() {
         pastAcaras.sort((a, b) => b.date.localeCompare(a.date));
 
         if (acaras.length === 0) {
-            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada acara.</p>';
+            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada acara.</p>' + buildDrawerBackupFooterHtml();
             return;
         }
 
@@ -433,13 +1205,13 @@ function renderSideDrawerContent() {
             pastAcaras.forEach((t) => { html += buildAcaraCard(t, true); });
         }
 
-        container.innerHTML = html;
+        container.innerHTML = html + buildDrawerBackupFooterHtml();
     } else if (currentDrawerTab === 'Libur') {
         if (labelEl) labelEl.innerText = 'Hari Libur';
         const libur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
 
         if (libur.length === 0) {
-            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada jadwal hari libur.</p>';
+            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada jadwal hari libur pribadi.</p>' + buildDrawerBackupFooterHtml();
             return;
         }
 
@@ -498,7 +1270,7 @@ function renderSideDrawerContent() {
             pastLibur.forEach((l) => { html += buildLiburCard(l, true); });
         }
 
-        container.innerHTML = html;
+        container.innerHTML = html + buildDrawerBackupFooterHtml();
     }
 }
 
@@ -517,7 +1289,8 @@ function initSideDrawerGestures() {
     document.addEventListener('touchstart', (e) => {
         if (e.touches.length !== 1) return;
         const insertModal = document.getElementById('insert-modal');
-        if (insertModal && insertModal.style.display === 'flex') return;
+        const backupModal = document.getElementById('backup-modal');
+        if ((insertModal && insertModal.style.display === 'flex') || (backupModal && backupModal.style.display === 'flex')) return;
 
         startX = e.touches[0].clientX;
         startY = e.touches[0].clientY;
@@ -530,7 +1303,8 @@ function initSideDrawerGestures() {
     document.addEventListener('touchmove', (e) => {
         if (e.touches.length !== 1) return;
         const insertModal = document.getElementById('insert-modal');
-        if (insertModal && insertModal.style.display === 'flex') return;
+        const backupModal = document.getElementById('backup-modal');
+        if ((insertModal && insertModal.style.display === 'flex') || (backupModal && backupModal.style.display === 'flex')) return;
 
         currentX = e.touches[0].clientX;
         const dx = currentX - startX;
@@ -995,7 +1769,7 @@ function initRoutineSelectAll() {
 function closeModal(id) {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
-    if (id !== 'semester-form-modal') editId = null;
+    if (id !== 'semester-form-modal' && id !== 'backup-modal') editId = null;
     showFabAfterModal();
 }
 
@@ -1003,17 +1777,6 @@ function toggleDetail(element) { const detail = element.querySelector('.card-det
 function formatShortDate(dateStr) {
     if(!dateStr) return ''; const parts = dateStr.split('-');
     if(parts.length !== 3) return dateStr; return `${parts[2]}-${parts[1]}-${parts[0].substring(2)}`;
-}
-
-function isUserHoliday(dateStr) {
-    let savedLibur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
-    let tDate = new Date(dateStr); tDate.setHours(0,0,0,0);
-    for(let l of savedLibur) {
-        let sDate = new Date(l.startDate); sDate.setHours(0,0,0,0);
-        let eDate = new Date(l.endDate); eDate.setHours(0,0,0,0);
-        if(tDate >= sDate && tDate <= eDate) return l.name;
-    }
-    return null;
 }
 
 // LOGIKA RENTANG TANGGAL UNTUK ACARA
@@ -1070,10 +1833,38 @@ function refreshAllViews() {
 }
 
 // --- BERANDA ---
+function setupBerandaUtilityBar() {
+    const scheduleListEl = document.getElementById('schedule-list');
+    if (!scheduleListEl || document.getElementById('beranda-utility-bar')) return;
+
+    const headerEl = document.querySelector('header');
+    if (!headerEl) return;
+
+    const bar = document.createElement('div');
+    bar.id = 'beranda-utility-bar';
+    bar.className = 'beranda-utility-bar';
+    bar.innerHTML = `
+        <button type="button" class="utility-pill" onclick="refreshUserCoordinates(true)" title="Perbarui lokasi jadwal salat">
+            <span id="beranda-loc-icon">${iPin}</span>
+            <span class="loc-text" id="beranda-loc-text">Memuat lokasi...</span>
+        </button>
+        <button type="button" class="utility-pill backup-pill" onclick="openBackupModal()">
+            ${iBkp}
+            <span>Cadangkan</span>
+        </button>
+    `;
+    headerEl.insertAdjacentElement('afterend', bar);
+    updateLocationPillUI(null, false);
+}
+
 ensureSemesterInitialized();
+cleanupOldCache();
+
 if(document.getElementById('schedule-list')) {
+    setupBerandaUtilityBar();
+    ensureAutoHolidaysForYear(new Date().getFullYear());
     loadTodaySchedule();
-    refreshUserCoordinates();
+    refreshUserCoordinates(false);
 }
 
 async function loadTodaySchedule() {
@@ -1084,7 +1875,7 @@ async function loadTodaySchedule() {
     let savedMatkul = getActiveMatkulList(); let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
     let savedTasks = JSON.parse(localStorage.getItem('nalaTasks')) || []; let savedRoutines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
 
-    let isHoliday = liburNasional[todayStr] || isUserHoliday(todayStr);
+    let isHoliday = getHolidayInfo(todayStr);
     let todaysMatkul = savedMatkul.filter(m => m.hari === todayDayName);
     if(todayDayName === 'Minggu' || isHoliday) todaysMatkul = []; 
     
@@ -1109,7 +1900,7 @@ async function loadTodaySchedule() {
 
     const salatList = await fetchSalatTimingsForDate(today, todayStr);
     salatList.forEach((s) => {
-        combinedSchedule.push({ type: 'salat', id: s.name, name: s.name, badge: '', time: s.time, endTime: '', color: 'var(--color-salat)', desc: 'Waktu Salat' });
+        combinedSchedule.push({ type: 'salat', id: s.name, name: s.name, badge: '', time: s.time, endTime: '', color: 'var(--color-salat)', desc: 'Waktu Salat (Kemenag RI)' });
     });
 
     combinedSchedule.sort((a, b) => a.time.localeCompare(b.time));
@@ -1220,6 +2011,7 @@ if(document.getElementById('calendar-grid')) {
 function renderMonthCalendar() {
     const grid = document.getElementById('calendar-grid'); if(!grid) return; grid.innerHTML = '';
     const year = currentNavDate.getFullYear(); const month = currentNavDate.getMonth();
+    ensureAutoHolidaysForYear(year);
     
     const realToday = new Date();
     const realTodayStr = `${realToday.getFullYear()}-${String(realToday.getMonth()+1).padStart(2, '0')}-${String(realToday.getDate()).padStart(2, '0')}`;
@@ -1265,7 +2057,7 @@ function renderMonthCalendar() {
         let currentLoopDate = `${year}-${String(month+1).padStart(2, '0')}-${String(i).padStart(2, '0')}`; let loopDayName = namaHari[new Date(year, month, i).getDay()];
         
         let dayColors = []; 
-        let isHoliday = liburNasional[currentLoopDate] || isUserHoliday(currentLoopDate);
+        let isHoliday = getHolidayInfo(currentLoopDate);
         let isOffDay = (loopDayName === 'Minggu') || isHoliday;
         
         let matkulsToday = savedMatkul.filter(m => m.hari === loopDayName); 
@@ -1420,7 +2212,7 @@ function showDayDetails(dateStr, dayName) {
     let overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
     let savedTasks = JSON.parse(localStorage.getItem('nalaTasks')) || [];
     
-    let isHoliday = liburNasional[dateStr] || isUserHoliday(dateStr); 
+    let isHoliday = getHolidayInfo(dateStr); 
     let isOffDay = (dayName === 'Minggu') || isHoliday;
     
     let popUpItems = [];
@@ -1483,7 +2275,7 @@ function showDayDetails(dateStr, dayName) {
     
     if(!listHtml) listHtml = '<p style="color:var(--text-muted); font-size:14px; text-align:center;">Tidak ada jadwal.</p>';
     
-    let holidayText = isHoliday ? ` ${isHoliday}` : '';
+    let holidayText = isHoliday ? ` • ${isHoliday}` : '';
     document.getElementById('detail-date-title').innerText = `${formatShortDate(dateStr)}${holidayText}`; 
     document.getElementById('detail-list').innerHTML = listHtml;
     hideFabForModal();
@@ -1817,7 +2609,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- FITUR TUTUP MODAL DENGAN KLIK DI LUAR ---
     window.addEventListener('click', function(e) {
-        const dismissibleModals = ['day-detail-modal']; 
+        const dismissibleModals = ['day-detail-modal', 'backup-modal']; 
         
         dismissibleModals.forEach(modalId => {
             const overlay = document.getElementById(modalId);

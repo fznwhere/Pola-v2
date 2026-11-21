@@ -2,6 +2,7 @@ let currentNavDate = new Date();
 let editId = null;
 const namaHari = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 const PAGE_ORDER = ['beranda', 'kalender', 'matkul'];
+const PAGE_GAP_PX = 24;
 const FORM_MODAL_IDS = ['insert-modal', 'matkul-modal', 'reschedule-modal', 'semester-form-modal'];
 const ALL_MODAL_IDS = ['semester-form-modal', 'insert-modal', 'matkul-modal', 'reschedule-modal', 'day-detail-modal', 'backup-modal', 'city-manual-modal'];
 
@@ -11,6 +12,7 @@ let currentMainPage = 'beranda';
 let editSemesterId = null;
 let pendingBackupPayload = null;
 let scheduleRenderToken = 0;
+let pageTransitionTimer = null;
 const fetchingHolidayYears = new Set();
 
 // Snapshot form untuk deteksi ketikan yang belum disimpan
@@ -75,7 +77,7 @@ const iPin = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${st
 const iRef = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${strk}" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>`;
 const iBkp = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="var(--btn-primary)" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`;
 
-// --- STYLE INJECTION UNTUK CAROUSEL ANTAR HALAMAN (WHATSAPP-STYLE) ---
+// --- STYLE INJECTION UNTUK CAROUSEL ANTAR HALAMAN (SMOOTH & BERJARAK) ---
 function injectEnhancedStyles() {
     if (document.getElementById('pola-enhanced-styles')) return;
     const style = document.createElement('style');
@@ -85,18 +87,24 @@ function injectEnhancedStyles() {
             width: 100%;
             overflow-x: hidden;
             position: relative;
+            touch-action: pan-y;
+            -webkit-overflow-scrolling: touch;
         }
         .pages-track {
             display: flex;
-            width: 300%;
+            flex-direction: row;
             align-items: flex-start;
+            gap: ${PAGE_GAP_PX}px;
             will-change: transform;
-            transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+            transform: translate3d(0, 0, 0);
         }
         .page-view {
-            width: 33.333333%;
             flex-shrink: 0;
             box-sizing: border-box;
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
         }
         .pages-track:not(.swiping) .page-view.inactive-page {
             max-height: 100vh;
@@ -278,9 +286,7 @@ function popOverlayHistoryState() {
     }
 }
 
-// Mengembalikan true jika tidak ada overlay tersisa sehingga aplikasi boleh keluar
 async function handleHardwareBackAction(fromPopstate = false) {
-    // 1. Jika dialog alert/confirm sedang terbuka, tutup dialog tersebut
     const dialogOverlay = document.getElementById('pola-dialog-overlay');
     if (dialogOverlay && dialogOverlay.style.display === 'flex') {
         const cancelBtn = document.getElementById('pola-dialog-cancel');
@@ -290,7 +296,6 @@ async function handleHardwareBackAction(fromPopstate = false) {
         return false;
     }
 
-    // 2. Cek semua modal (dari yang paling atas)
     for (const mId of ALL_MODAL_IDS) {
         if (isElementFlexVisible(mId)) {
             if (FORM_MODAL_IDS.includes(mId)) {
@@ -302,28 +307,24 @@ async function handleHardwareBackAction(fromPopstate = false) {
         }
     }
 
-    // 3. Jika menu FAB (+) terbuka, tutup menunya
     const fabMenu = document.getElementById('fab-menu');
     if (fabMenu && fabMenu.classList.contains('show')) {
         closeFabMenu(fromPopstate);
         return false;
     }
 
-    // 4. Jika halaman geser kiri (Rutinitas/Acara/Libur) terbuka, tutup
     const leftDrawer = document.getElementById('side-drawer');
     if (leftDrawer && leftDrawer.classList.contains('open')) {
         closeSideDrawer(fromPopstate);
         return false;
     }
 
-    // 5. Jika halaman geser kanan (Jadwal Semester) terbuka, tutup
     const rightDrawer = document.getElementById('right-semester-drawer');
     if (rightDrawer && rightDrawer.classList.contains('open')) {
         closeRightSemesterDrawer(fromPopstate);
         return false;
     }
 
-    // 6. Sudah bersih di Beranda / Kalender / Kuliah -> boleh keluar aplikasi
     return true;
 }
 
@@ -352,7 +353,51 @@ function initAndroidBackButtonHandler() {
     }
 }
 
-// --- NAVIGASI ANTAR-HALAMAN SPA SEPERTI WHATSAPP (GESER TANPA BLUR) ---
+// --- NAVIGASI ANTAR-HALAMAN SPA (SMOOTH & BERJARAK) ---
+function syncPagesCarouselLayout(reposition = false) {
+    const appContainer = document.querySelector('.app-container');
+    const viewport = document.getElementById('pages-viewport');
+    const track = document.getElementById('pages-track');
+    if (!appContainer || !viewport || !track) return 360;
+
+    const cs = window.getComputedStyle(appContainer);
+    const padL = parseFloat(cs.paddingLeft) || 0;
+    const padR = parseFloat(cs.paddingRight) || 0;
+
+    if (padL > 0 || padR > 0) {
+        viewport.style.marginLeft = `-${padL}px`;
+        viewport.style.marginRight = `-${padR}px`;
+        viewport.style.width = `calc(100% + ${padL + padR}px)`;
+    } else {
+        viewport.style.marginLeft = '0px';
+        viewport.style.marginRight = '0px';
+        viewport.style.width = '100%';
+    }
+
+    const slideWidth = viewport.offsetWidth || appContainer.offsetWidth || window.innerWidth;
+    const sidePad = Math.max(padL, padR, 18);
+
+    track.style.width = `${slideWidth * PAGE_ORDER.length + PAGE_GAP_PX * (PAGE_ORDER.length - 1)}px`;
+    PAGE_ORDER.forEach((p) => {
+        const sec = document.getElementById(`page-${p}`);
+        if (sec) {
+            sec.style.width = `${slideWidth}px`;
+            sec.style.flex = `0 0 ${slideWidth}px`;
+            sec.style.paddingLeft = `${sidePad}px`;
+            sec.style.paddingRight = `${sidePad}px`;
+        }
+    });
+
+    if (reposition) {
+        const curIdx = PAGE_ORDER.indexOf(currentMainPage);
+        const stepPx = slideWidth + PAGE_GAP_PX;
+        track.style.transition = 'none';
+        track.style.transform = `translate3d(${-curIdx * stepPx}px, 0, 0)`;
+    }
+
+    return slideWidth;
+}
+
 function ensurePagesCarouselStructure() {
     injectEnhancedStyles();
     const appContainer = document.querySelector('.app-container');
@@ -385,6 +430,8 @@ function ensurePagesCarouselStructure() {
             sec.classList.toggle('inactive-page', p !== currentMainPage);
         }
     });
+
+    syncPagesCarouselLayout(false);
 }
 
 function updateFabForCurrentPage() {
@@ -415,9 +462,10 @@ function handleMainFabClick() {
     }
 }
 
-function switchMainPage(pageName, animate = true) {
+function switchMainPage(pageName, animate = true, customDurationMs = 260, fromSwipe = false) {
     if (!PAGE_ORDER.includes(pageName)) pageName = 'beranda';
     const prevPage = currentMainPage;
+    const isPageChanged = prevPage !== pageName;
     currentMainPage = pageName;
 
     closeFabMenu();
@@ -426,50 +474,81 @@ function switchMainPage(pageName, animate = true) {
 
     ensurePagesCarouselStructure();
     const track = document.getElementById('pages-track');
+    const slideWidth = syncPagesCarouselLayout(false);
+    const stepPx = slideWidth + PAGE_GAP_PX;
     const targetIndex = PAGE_ORDER.indexOf(pageName);
+    const currentScrollY = window.scrollY || 0;
 
     PAGE_ORDER.forEach((p) => {
         const navBtn = document.getElementById(`nav-${p}`);
         if (navBtn) navBtn.classList.toggle('active', p === pageName);
         const sec = document.getElementById(`page-${p}`);
-        if (sec && p === pageName) {
-            sec.classList.remove('inactive-page');
+        if (sec) {
+            if (p === pageName) {
+                sec.classList.remove('inactive-page');
+                if (animate && isPageChanged && currentScrollY > 0 && !sec.style.marginTop) {
+                    sec.style.marginTop = `${currentScrollY}px`;
+                }
+            } else if (p === prevPage && animate && isPageChanged) {
+                sec.classList.remove('inactive-page');
+            }
         }
     });
 
-    if (track) {
-        if (animate) {
-            track.classList.add('swiping');
-            track.style.transition = 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)';
-        } else {
+    if (pageTransitionTimer) {
+        clearTimeout(pageTransitionTimer);
+        pageTransitionTimer = null;
+    }
+
+    const finalizeSlide = () => {
+        if (track) {
+            track.classList.remove('swiping');
             track.style.transition = 'none';
         }
-        track.style.transform = `translate3d(${-targetIndex * (100 / 3)}%, 0, 0)`;
+        let hadScrollOffset = false;
+        PAGE_ORDER.forEach((p) => {
+            const sec = document.getElementById(`page-${p}`);
+            if (sec) {
+                if (sec.style.marginTop) hadScrollOffset = true;
+                sec.style.marginTop = '';
+                sec.classList.toggle('inactive-page', p !== currentMainPage);
+            }
+        });
+        if (isPageChanged && (hadScrollOffset || (window.scrollY || 0) > 0)) {
+            window.scrollTo({ top: 0, behavior: 'instant' });
+        }
 
-        window.setTimeout(() => {
-            track.classList.remove('swiping');
-            PAGE_ORDER.forEach((p) => {
-                const sec = document.getElementById(`page-${p}`);
-                if (sec) sec.classList.toggle('inactive-page', p !== currentMainPage);
-            });
-        }, animate ? 290 : 0);
+        // Refresh data setelah animasi selesai agar transisi geser tetap 60fps tanpa patah
+        if (!fromSwipe || isPageChanged) {
+            if (pageName === 'beranda') {
+                loadTodaySchedule();
+            } else if (pageName === 'kalender') {
+                renderMonthCalendar();
+                renderUpcomingTasks();
+                renderHistory(currentHistoryTab);
+            } else if (pageName === 'matkul') {
+                renderMatkulList();
+            }
+        }
+    };
+
+    if (track) {
+        if (animate) {
+            // Paksa reflow ringan hanya saat memulai animasi CSS dari posisi saat ini
+            void track.offsetWidth;
+            track.classList.add('swiping');
+            track.style.transition = `transform ${customDurationMs}ms cubic-bezier(0.22, 1, 0.36, 1)`;
+            track.style.transform = `translate3d(${-targetIndex * stepPx}px, 0, 0)`;
+            pageTransitionTimer = window.setTimeout(finalizeSlide, customDurationMs + 20);
+        } else {
+            track.style.transition = 'none';
+            track.style.transform = `translate3d(${-targetIndex * stepPx}px, 0, 0)`;
+            finalizeSlide();
+        }
     }
 
     updateFabForCurrentPage();
     showFabAfterModal();
-    if (prevPage !== pageName) {
-        window.scrollTo({ top: 0, behavior: 'instant' });
-    }
-
-    if (pageName === 'beranda') {
-        loadTodaySchedule();
-    } else if (pageName === 'kalender') {
-        renderMonthCalendar();
-        renderUpcomingTasks();
-        renderHistory(currentHistoryTab);
-    } else if (pageName === 'matkul') {
-        renderMatkulList();
-    }
 }
 
 // --- PEMBERSIH CACHE LAMA OTOMATIS ---
@@ -847,7 +926,6 @@ async function saveManualCityLocation() {
 }
 
 async function getRawDevicePosition(manual) {
-    // 1. Coba plugin native Capacitor Geolocation jika terpasang (memicu popup izin native Android)
     const CapGeo = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Geolocation;
     if (CapGeo && typeof CapGeo.getCurrentPosition === 'function') {
         try {
@@ -865,12 +943,9 @@ async function getRawDevicePosition(manual) {
             if (pos && pos.coords) {
                 return { lat: pos.coords.latitude, lng: pos.coords.longitude };
             }
-        } catch (e) {
-            // Lanjut fallback ke navigator.geolocation
-        }
+        } catch (e) {}
     }
 
-    // 2. Fallback WebView / Browser Geolocation (juga memicu popup izin jika AndroidManifest.xml sudah ada izin lokasi)
     if (!navigator.geolocation) return null;
 
     return new Promise((resolve) => {
@@ -888,7 +963,6 @@ async function getRawDevicePosition(manual) {
 
 async function refreshUserCoordinates(manual = false) {
     const current = getSavedCoordinates();
-    // Jika user sudah mengatur kota manual dan ini bukan klik manual tombol lokasi, pertahankan pilihan kotanya
     if (!manual && current.isManualCity) {
         updateLocationPillUI(null, false);
         return current;
@@ -2086,7 +2160,7 @@ async function deleteSemesterItem(semId) {
     refreshAllViews();
 }
 
-// --- PENGENDALI GESER TERPADU: ANTAR HALAMAN (TANPA BLUR) & DRAWER (DENGAN BLUR) ---
+// --- PENGENDALI GESER TERPADU: ANTAR HALAMAN (60FPS & BERJARAK) & DRAWER (BLUR) ---
 function initUnifiedSwipeGestures() {
     ensurePagesCarouselStructure();
     ensureSideDrawerStickyFooter();
@@ -2095,14 +2169,51 @@ function initUnifiedSwipeGestures() {
     const rightDrawer = document.getElementById('right-semester-drawer');
     const backdrop = getOrCreateDrawerBlurBackdrop();
     const track = document.getElementById('pages-track');
-    const viewport = document.getElementById('pages-viewport');
 
     let startX = 0;
     let startY = 0;
     let currentX = 0;
+    let lastX = 0;
+    let lastTime = 0;
+    let velocityX = 0;
+    let cachedSlideWidth = 360;
+    let cachedLeftDrawerW = 360;
+    let cachedRightDrawerW = 360;
     let gestureDecided = false;
     let swipeMode = null; // 'left-drawer' | 'right-drawer' | 'page-carousel'
     let startedDrawerOpen = false;
+    let rafId = null;
+
+    const cancelPendingFrame = () => {
+        if (rafId !== null) {
+            cancelAnimationFrame(rafId);
+            rafId = null;
+        }
+    };
+
+    const renderSwipeFrame = () => {
+        rafId = null;
+        if (!swipeMode) return;
+        const dx = currentX - startX;
+
+        if (swipeMode === 'left-drawer' && leftDrawer) {
+            let progress = startedDrawerOpen ? 1 + dx / cachedLeftDrawerW : dx / cachedLeftDrawerW;
+            progress = Math.max(0, Math.min(1, progress));
+            leftDrawer.style.transform = `translate3d(${-150 + progress * 100}%, 0, 0)`;
+            setDrawerBlurProgress(progress);
+        } else if (swipeMode === 'right-drawer' && rightDrawer) {
+            let progress = startedDrawerOpen ? 1 - dx / cachedRightDrawerW : -dx / cachedRightDrawerW;
+            progress = Math.max(0, Math.min(1, progress));
+            rightDrawer.style.transform = `translate3d(${50 - progress * 100}%, 0, 0)`;
+            setDrawerBlurProgress(progress);
+        } else if (swipeMode === 'page-carousel' && track) {
+            const curIdx = PAGE_ORDER.indexOf(currentMainPage);
+            const stepPx = cachedSlideWidth + PAGE_GAP_PX;
+            const clampedDx = Math.max(-stepPx, Math.min(stepPx, dx));
+            const basePx = -curIdx * stepPx;
+            track.style.transform = `translate3d(${basePx + clampedDx}px, 0, 0)`;
+        }
+    };
 
     document.addEventListener('touchstart', (e) => {
         if (e.touches.length !== 1) return;
@@ -2114,9 +2225,13 @@ function initUnifiedSwipeGestures() {
         if (fabMenu && fabMenu.classList.contains('show')) return;
         if (e.target && e.target.closest('input, textarea, select')) return;
 
+        cancelPendingFrame();
         startX = e.touches[0].clientX;
         startY = e.touches[0].clientY;
         currentX = startX;
+        lastX = startX;
+        lastTime = performance.now();
+        velocityX = 0;
         gestureDecided = false;
         swipeMode = null;
     }, { passive: true });
@@ -2128,15 +2243,24 @@ function initUnifiedSwipeGestures() {
             if (isElementFlexVisible(mId)) return;
         }
 
+        const now = performance.now();
         currentX = e.touches[0].clientX;
+        const dt = now - lastTime;
+        if (dt > 0) {
+            const instVx = (currentX - lastX) / dt;
+            velocityX = velocityX * 0.35 + instVx * 0.65;
+            lastX = currentX;
+            lastTime = now;
+        }
+
         const dx = currentX - startX;
         const dy = e.touches[0].clientY - startY;
 
         if (!gestureDecided) {
-            if (Math.abs(dx) < 14 && Math.abs(dy) < 14) return;
+            if (Math.abs(dx) < 9 && Math.abs(dy) < 9) return;
             gestureDecided = true;
 
-            if (Math.abs(dx) <= Math.abs(dy) * 1.35) {
+            if (Math.abs(dx) <= Math.abs(dy) * 1.15) {
                 swipeMode = null;
                 return;
             }
@@ -2148,6 +2272,7 @@ function initUnifiedSwipeGestures() {
                 if (dx < 0 && leftDrawer) {
                     swipeMode = 'left-drawer';
                     startedDrawerOpen = true;
+                    cachedLeftDrawerW = leftDrawer.offsetWidth || window.innerWidth;
                     leftDrawer.style.transition = 'none';
                     leftDrawer.style.visibility = 'visible';
                     backdrop.style.transition = 'none';
@@ -2156,106 +2281,118 @@ function initUnifiedSwipeGestures() {
                 if (dx > 0 && rightDrawer) {
                     swipeMode = 'right-drawer';
                     startedDrawerOpen = true;
+                    cachedRightDrawerW = rightDrawer.offsetWidth || window.innerWidth;
                     rightDrawer.style.transition = 'none';
                     rightDrawer.style.visibility = 'visible';
                     backdrop.style.transition = 'none';
                 }
             } else if (currentMainPage === 'beranda' && dx > 0 && leftDrawer) {
-                // Ujung kiri (Beranda) digeser ke kanan -> buka Side Drawer DENGAN BLUR
                 swipeMode = 'left-drawer';
                 startedDrawerOpen = false;
+                cachedLeftDrawerW = leftDrawer.offsetWidth || window.innerWidth;
                 leftDrawer.style.transition = 'none';
                 leftDrawer.style.visibility = 'visible';
                 backdrop.style.transition = 'none';
                 renderSideDrawerContent();
             } else if (currentMainPage === 'matkul' && dx < 0 && rightDrawer) {
-                // Ujung kanan (Kuliah) digeser ke kiri -> buka Semester Drawer DENGAN BLUR
                 swipeMode = 'right-drawer';
                 startedDrawerOpen = false;
+                cachedRightDrawerW = rightDrawer.offsetWidth || window.innerWidth;
                 rightDrawer.style.transition = 'none';
                 rightDrawer.style.visibility = 'visible';
                 backdrop.style.transition = 'none';
                 renderSemesterDrawerList();
             } else if (track) {
-                // Geser antar halaman utama (Beranda <-> Kalender <-> Kuliah) TANPA BLUR
                 const curIdx = PAGE_ORDER.indexOf(currentMainPage);
                 if ((dx < 0 && curIdx < PAGE_ORDER.length - 1) || (dx > 0 && curIdx > 0)) {
                     swipeMode = 'page-carousel';
+                    if (pageTransitionTimer) {
+                        clearTimeout(pageTransitionTimer);
+                        pageTransitionTimer = null;
+                    }
                     setDrawerBlurProgress(0);
+                    cachedSlideWidth = syncPagesCarouselLayout(false);
                     track.classList.add('swiping');
                     track.style.transition = 'none';
-                    PAGE_ORDER.forEach((p) => {
+
+                    const currentScrollY = window.scrollY || 0;
+                    const adjIdx = dx < 0 ? curIdx + 1 : curIdx - 1;
+                    PAGE_ORDER.forEach((p, idx) => {
                         const sec = document.getElementById(`page-${p}`);
-                        if (sec) sec.classList.remove('inactive-page');
+                        if (!sec) return;
+                        if (idx === curIdx) {
+                            sec.classList.remove('inactive-page');
+                            sec.style.marginTop = '';
+                        } else if (idx === adjIdx) {
+                            sec.classList.remove('inactive-page');
+                            sec.style.marginTop = currentScrollY > 0 ? `${currentScrollY}px` : '';
+                        } else {
+                            sec.classList.add('inactive-page');
+                            sec.style.marginTop = '';
+                        }
                     });
                 }
             }
         }
 
-        if (!swipeMode) return;
-
-        if (swipeMode === 'left-drawer' && leftDrawer) {
-            const drawerWidth = leftDrawer.offsetWidth || window.innerWidth;
-            let progress = startedDrawerOpen ? 1 + dx / drawerWidth : dx / drawerWidth;
-            progress = Math.max(0, Math.min(1, progress));
-            leftDrawer.style.transform = `translate(${-150 + progress * 100}%, 0)`;
-            setDrawerBlurProgress(progress);
-        } else if (swipeMode === 'right-drawer' && rightDrawer) {
-            const drawerWidth = rightDrawer.offsetWidth || window.innerWidth;
-            let progress = startedDrawerOpen ? 1 - dx / drawerWidth : -dx / drawerWidth;
-            progress = Math.max(0, Math.min(1, progress));
-            rightDrawer.style.transform = `translate(${50 - progress * 100}%, 0)`;
-            setDrawerBlurProgress(progress);
-        } else if (swipeMode === 'page-carousel' && track) {
-            const curIdx = PAGE_ORDER.indexOf(currentMainPage);
-            const vpWidth = (viewport && viewport.offsetWidth) || window.innerWidth;
-            const clampedDx = Math.max(-vpWidth, Math.min(vpWidth, dx));
-            const basePct = -curIdx * (100 / 3);
-            const deltaPct = (clampedDx / vpWidth) * (100 / 3);
-            track.style.transform = `translate3d(${basePct + deltaPct}%, 0, 0)`;
+        if (swipeMode && rafId === null) {
+            rafId = requestAnimationFrame(renderSwipeFrame);
         }
     }, { passive: true });
 
-    document.addEventListener('touchend', () => {
+    const finishSwipeGesture = () => {
+        cancelPendingFrame();
         if (!swipeMode) return;
         const mode = swipeMode;
         swipeMode = null;
         const dx = currentX - startX;
 
         if (mode === 'left-drawer' && leftDrawer) {
-            const drawerWidth = leftDrawer.offsetWidth || window.innerWidth;
-            const threshold = drawerWidth * 0.25;
+            const threshold = cachedLeftDrawerW * 0.24;
             if (!startedDrawerOpen) {
-                if (dx > threshold) openSideDrawer();
+                if (dx > threshold || velocityX > 0.4) openSideDrawer();
                 else closeSideDrawer(true);
             } else {
-                if (dx < -threshold) closeSideDrawer();
+                if (dx < -threshold || velocityX < -0.4) closeSideDrawer();
                 else openSideDrawer();
             }
         } else if (mode === 'right-drawer' && rightDrawer) {
-            const drawerWidth = rightDrawer.offsetWidth || window.innerWidth;
-            const threshold = drawerWidth * 0.25;
+            const threshold = cachedRightDrawerW * 0.24;
             if (!startedDrawerOpen) {
-                if (dx < -threshold) openRightSemesterDrawer();
+                if (dx < -threshold || velocityX < -0.4) openRightSemesterDrawer();
                 else closeRightSemesterDrawer(true);
             } else {
-                if (dx > threshold) closeRightSemesterDrawer();
+                if (dx > threshold || velocityX > 0.4) closeRightSemesterDrawer();
                 else openRightSemesterDrawer();
             }
         } else if (mode === 'page-carousel') {
             const curIdx = PAGE_ORDER.indexOf(currentMainPage);
-            const vpWidth = (viewport && viewport.offsetWidth) || window.innerWidth;
-            const threshold = vpWidth * 0.22;
+            const stepPx = cachedSlideWidth + PAGE_GAP_PX;
+            const threshold = cachedSlideWidth * 0.24;
+            const isFastFlickLeft = velocityX < -0.35 && dx < -24;
+            const isFastFlickRight = velocityX > 0.35 && dx > 24;
 
-            if (dx < -threshold && curIdx < PAGE_ORDER.length - 1) {
-                switchMainPage(PAGE_ORDER[curIdx + 1], true);
-            } else if (dx > threshold && curIdx > 0) {
-                switchMainPage(PAGE_ORDER[curIdx - 1], true);
-            } else {
-                switchMainPage(currentMainPage, true);
+            let targetIdx = curIdx;
+            if ((dx < -threshold || isFastFlickLeft) && curIdx < PAGE_ORDER.length - 1) {
+                targetIdx = curIdx + 1;
+            } else if ((dx > threshold || isFastFlickRight) && curIdx > 0) {
+                targetIdx = curIdx - 1;
             }
+
+            const remainingPx = Math.abs((targetIdx - curIdx) * stepPx + dx);
+            const speedPxPerMs = Math.max(Math.abs(velocityX), 1.35);
+            const durationMs = Math.max(180, Math.min(280, Math.round(remainingPx / speedPxPerMs)));
+
+            switchMainPage(PAGE_ORDER[targetIdx], true, durationMs, true);
         }
-    });
+    };
+
+    document.addEventListener('touchend', finishSwipeGesture);
+    document.addEventListener('touchcancel', finishSwipeGesture);
+
+    window.addEventListener('resize', () => {
+        syncPagesCarouselLayout(true);
+    }, { passive: true });
 }
 
 function getOrCreateFabBackdrop() {
@@ -3362,6 +3499,16 @@ document.addEventListener("DOMContentLoaded", () => {
     ensureReminderFieldsInjected();
     initUnifiedSwipeGestures();
     initAndroidBackButtonHandler();
+
+    // Render awal semua tab agar siap digeser seketika tanpa delay
+    if (document.getElementById('calendar-grid')) {
+        renderMonthCalendar();
+        renderUpcomingTasks();
+        renderHistory(currentHistoryTab);
+    }
+    if (document.getElementById('matkul-list')) {
+        renderMatkulList();
+    }
 
     document.querySelectorAll('.swatch').forEach(sw => { 
         sw.addEventListener('click', function(e) { 

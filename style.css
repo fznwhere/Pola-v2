@@ -54,11 +54,74 @@ header p { color: var(--text-muted); font-size: 14px; font-weight: 500; margin-t
 .section-title { font-size: 16px; font-weight: 700; margin-bottom: 12px; color: var(--text-main); }
 .svg-icon { vertical-align: text-bottom; width: 14px; height: 14px; margin-right: 4px; }
 
-.fab-container { position: fixed; bottom: 90px; right: 20px; display: flex; flex-direction: column; align-items: flex-end; z-index: 10; }
-.fab-menu { display: none; flex-direction: column; gap: 10px; margin-bottom: 15px; align-items: flex-end; }
-.fab-menu button { background-color: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-line); padding: 10px 16px; border-radius: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); font-size: 14px; font-weight: 600; cursor: pointer; }
-.fab { background-color: var(--text-main); color: #FFF; width: 60px; height: 60px; border-radius: 50%; display: flex; justify-content: center; align-items: center; box-shadow: 0 4px 12px rgba(0,0,0,0.15); cursor: pointer; transition: 0.2s; }
-.fab:active { transform: scale(0.95); }
+/* --- FAB & BACKDROP BLUR ALA GOOGLE DRIVE --- */
+.fab-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(45, 42, 38, 0.28);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.25s ease, visibility 0.25s ease;
+    z-index: 14;
+}
+.fab-backdrop.show {
+    opacity: 1;
+    visibility: visible;
+}
+
+.fab-container { position: fixed; bottom: 90px; right: 20px; display: flex; flex-direction: column; align-items: flex-end; z-index: 15; }
+.fab-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 15px;
+    align-items: flex-end;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(14px) scale(0.94);
+    transform-origin: bottom right;
+    transition: opacity 0.22s ease, transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1), visibility 0.22s ease;
+    pointer-events: none;
+}
+.fab-menu.show {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+}
+.fab-menu button {
+    background-color: var(--bg-card);
+    color: var(--text-main);
+    border: 1px solid var(--border-line);
+    padding: 11px 18px;
+    border-radius: 22px;
+    box-shadow: 0 6px 16px rgba(45, 42, 38, 0.14);
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.15s ease, background-color 0.15s ease;
+}
+.fab-menu button:active { transform: scale(0.95); }
+
+.fab {
+    background-color: var(--text-main);
+    color: #FFF;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    box-shadow: 0 6px 18px rgba(45, 42, 38, 0.22);
+    cursor: pointer;
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.25s ease;
+}
+.fab svg { transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.fab.active { background-color: var(--btn-primary); }
+.fab.active svg { transform: rotate(45deg); }
+.fab:active { transform: scale(0.93); }
 
 .bottom-nav { position: fixed; bottom: 0; left: 0; width: 100%; height: 70px; background-color: var(--nav-bg); display: flex; justify-content: space-evenly; align-items: center; z-index: 9; border-top: 1px solid var(--border-line); }
 .nav-item svg { width: 24px; height: 24px; stroke: var(--text-muted); fill: none; stroke-width: 2; transition: 0.2s; margin-right: 0; }
@@ -133,9 +196,10 @@ header p { color: var(--text-muted); font-size: 14px; font-weight: 500; margin-t
 .btn-save { background-color: var(--btn-primary); color: white; }
 .btn-cancel { background-color: var(--btn-skip); color: var(--text-main); }
 
-.checkbox-group { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; margin-bottom: 15px; }
-.checkbox-group label { background: var(--bg-main); padding: 8px; border-radius: 8px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; border: 1px solid var(--border-line); }
-.checkbox-group input { accent-color: var(--btn-primary); }
+.checkbox-group { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px; margin-bottom: 15px; }
+.checkbox-group label { background: var(--bg-main); padding: 8px 6px; border-radius: 8px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 5px; cursor: pointer; border: 1px solid var(--border-line); margin-top: 0; }
+.checkbox-group label.check-all-label { border-color: var(--btn-primary); font-weight: 700; }
+.checkbox-group input { width: auto; padding: 0; accent-color: var(--btn-primary); }
 
 .color-swatches { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
 .swatch { width: 32px; height: 32px; border-radius: 50%; cursor: pointer; transition: 0.2s; position: relative; }

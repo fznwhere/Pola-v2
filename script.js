@@ -20,7 +20,70 @@ const iRom = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${st
 const iPls = `<svg viewBox="0 0 24 24" width="28" height="28" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
 const iDel = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${strk}" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
 
-function toggleFabMenu() { const menu = document.getElementById('fab-menu'); if(menu) menu.style.display = menu.style.display === 'flex' ? 'none' : 'flex'; }
+function getOrCreateFabBackdrop() {
+    let backdrop = document.getElementById('fab-backdrop');
+    const fabContainer = document.querySelector('.fab-container');
+    if (!backdrop && fabContainer) {
+        backdrop = document.createElement('div');
+        backdrop.id = 'fab-backdrop';
+        backdrop.className = 'fab-backdrop';
+        backdrop.onclick = closeFabMenu;
+        fabContainer.parentNode.insertBefore(backdrop, fabContainer);
+    }
+    return backdrop;
+}
+
+function toggleFabMenu() {
+    const menu = document.getElementById('fab-menu');
+    const fab = document.querySelector('.fab-container .fab');
+    const backdrop = getOrCreateFabBackdrop();
+    if (!menu) return;
+
+    const isOpen = menu.classList.toggle('show');
+    if (fab) fab.classList.toggle('active', isOpen);
+    if (backdrop) backdrop.classList.toggle('show', isOpen);
+}
+
+function closeFabMenu() {
+    const menu = document.getElementById('fab-menu');
+    const fab = document.querySelector('.fab-container .fab');
+    const backdrop = document.getElementById('fab-backdrop');
+    if (menu) menu.classList.remove('show');
+    if (fab) fab.classList.remove('active');
+    if (backdrop) backdrop.classList.remove('show');
+}
+
+function syncRoutineSelectAllState() {
+    const allCb = document.getElementById('routine-days-all');
+    const dayCbs = Array.from(document.querySelectorAll('input[name="routine-days"]'));
+    if (allCb && dayCbs.length > 0) {
+        allCb.checked = dayCbs.every(cb => cb.checked);
+    }
+}
+
+function initRoutineSelectAll() {
+    const group = document.querySelector('#field-rutinitas-hari .checkbox-group');
+    if (!group) return;
+
+    let allCb = document.getElementById('routine-days-all');
+    if (!allCb) {
+        const label = document.createElement('label');
+        label.className = 'check-all-label';
+        label.innerHTML = '<input type="checkbox" id="routine-days-all">Semua';
+        group.insertBefore(label, group.firstChild);
+        allCb = document.getElementById('routine-days-all');
+    }
+
+    const dayCbs = document.querySelectorAll('input[name="routine-days"]');
+    allCb.addEventListener('change', function () {
+        dayCbs.forEach(cb => { cb.checked = this.checked; });
+    });
+
+    dayCbs.forEach(cb => {
+        cb.addEventListener('change', syncRoutineSelectAllState);
+    });
+}
+
 function closeModal(id) { document.getElementById(id).style.display = 'none'; editId = null; }
 function toggleDetail(element) { const detail = element.querySelector('.card-detail'); if(detail) detail.classList.toggle('show'); }
 function formatShortDate(dateStr) {
@@ -145,7 +208,6 @@ async function loadTodaySchedule() {
         } else if(item.type === 'tugas' || item.type === 'acara') { 
             let extraInfo = '';
             if(item.via) extraInfo += `<span>Via/Kumpul:</span> <strong>${item.via}</strong><br>`;
-            // Tampilkan tempat/ruangan untuk Acara
             if(item.ruang) extraInfo += `<span>Tempat:</span> <strong>${item.ruang}</strong><br>`;
             
             detailHtml = `<p style="line-height:1.5;">${item.desc}</p> ${extraInfo ? `<div style="margin-top:12px; padding-top:12px; border-top:1px dashed var(--border-line);">${extraInfo}</div>` : ''} 
@@ -268,7 +330,7 @@ function renderUpcomingTasks() {
                             <button class="check-btn" onclick="event.stopPropagation(); toggleTaskDone('${t.id}')">${iCir}</button>
                             <div>
                                 <h3>${t.name}</h3>
-                                <small>${iDat} ${formatShortDate(t.date)} &nbsp; ${iClk} ${t.time}</small>
+                                <small>${iDat} ${formatShortDate(t.date)}   ${iClk} ${t.time}</small>
                             </div>
                         </div>
                         <span class="${badgeClass}">${badgeText}</span>
@@ -309,7 +371,7 @@ function renderHistory(tabName) {
                             <div class="card-title-group">
                                 <div>
                                     <h3 style="color:#FFFFFF;">${t.name}</h3>
-                                    <small style="color:var(--state-dimmed);">${iDat} ${dateText} &nbsp; ${iClk} ${t.time} ${t.endTime ? '- '+t.endTime : ''}</small>
+                                    <small style="color:var(--state-dimmed);">${iDat} ${dateText}   ${iClk} ${t.time} ${t.endTime ? '- '+t.endTime : ''}</small>
                                 </div>
                             </div>
                             <span class="tag-pill">Acara</span>
@@ -503,15 +565,14 @@ function saveReschedule() {
 
 function openModal(category) {
     editId = null; document.getElementById('modal-title').innerText = `Tambah ${category}`; document.getElementById('insert-form').reset();
+    syncRoutineSelectAllState();
     
     document.getElementById('field-nama-kegiatan').style.display = (category === 'Kuliah') ? 'none' : 'block';
     if(document.getElementById('field-matkul-dropdown')) document.getElementById('field-matkul-dropdown').style.display = (category === 'Tugas Kuliah' || category === 'Kuliah') ? 'block' : 'none';
     if(document.getElementById('field-pengumpulan')) document.getElementById('field-pengumpulan').style.display = (category === 'Tugas Kuliah') ? 'block' : 'none';
     
-    // Tampilkan kolom Ruangan untuk Kuliah DAN Acara
     if(document.getElementById('field-ruangan')) {
         document.getElementById('field-ruangan').style.display = (category === 'Kuliah' || category === 'Acara') ? 'block' : 'none';
-        // Sesuaikan label berdasarkan kategori
         let labelRuang = document.getElementById('field-ruangan').querySelector('label');
         if(labelRuang) labelRuang.innerText = (category === 'Acara') ? 'Ruangan/Tempat (Opsional)' : 'Ruangan';
     }
@@ -520,14 +581,12 @@ function openModal(category) {
     if(document.getElementById('field-warna')) { document.getElementById('field-warna').style.display = (category === 'Acara' || category === 'Rutinitas') ? 'block' : 'none'; }
     if(document.getElementById('field-tanggal')) document.getElementById('field-tanggal').style.display = (category === 'Rutinitas') ? 'none' : 'block';
     
-    // Tampilkan Tanggal Selesai untuk Libur DAN Acara
     if(document.getElementById('field-tanggal-selesai')) { 
         document.getElementById('field-tanggal-selesai').style.display = (category === 'Libur' || category === 'Acara') ? 'block' : 'none'; 
     }
     
     if(document.getElementById('field-jam')) document.getElementById('field-jam').style.display = (category === 'Libur') ? 'none' : 'block';
     
-    // Tampilkan Jam Selesai untuk Kuliah DAN Acara
     if(document.getElementById('field-jam-selesai')) {
         document.getElementById('field-jam-selesai').style.display = (category === 'Kuliah' || category === 'Acara') ? 'block' : 'none';
     }
@@ -545,7 +604,8 @@ function openModal(category) {
             if(!uniqueMatkul.includes(m.name)) { uniqueMatkul.push(m.name); sel.innerHTML += `<option value="${m.name}">${m.name}</option>`; }
         });
     }
-    document.getElementById('insert-modal').style.display = 'flex'; toggleFabMenu(); 
+    document.getElementById('insert-modal').style.display = 'flex';
+    closeFabMenu();
 }
 
 function openEditTask(id, category) {
@@ -574,6 +634,7 @@ function openEditRoutine(id) {
         if(document.getElementById('new-task-desc')) document.getElementById('new-task-desc').value = routine.desc || '';
         if(document.getElementById('new-task-color')) updateSwatchSelection(routine.color);
         document.querySelectorAll('input[name="routine-days"]').forEach(cb => { cb.checked = routine.days.includes(cb.value); });
+        syncRoutineSelectAllState();
     }
 }
 
@@ -635,13 +696,12 @@ function saveNewTask() {
         else if (category === 'Acara') { 
             taskData.color = document.getElementById('new-task-color') ? document.getElementById('new-task-color').value : 'var(--color-acara)'; 
             
-            // Simpan data tambahan untuk Acara
             const tEndInput = document.getElementById('new-task-time-end');
             if(tEndInput && tEndInput.value) taskData.endTime = tEndInput.value;
             
             const dEndInput = document.getElementById('new-task-date-end');
             if(dEndInput && dEndInput.value) taskData.endDate = dEndInput.value;
-            else taskData.endDate = date; // Default ke tanggal mulai jika kosong
+            else taskData.endDate = date;
             
             const ruangInput = document.getElementById('new-task-ruang');
             if(ruangInput && ruangInput.value) taskData.ruang = ruangInput.value;
@@ -672,7 +732,6 @@ function renderMatkulList() {
     const list = document.getElementById('matkul-list'); if(!list) return; list.innerHTML = ''; let savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
     if(savedMatkul.length === 0) { list.innerHTML = '<p style="text-align:center; color:var(--text-muted);">Belum ada jadwal kuliah.</p>'; return; }
     
-    // --- PENGURUTAN MATKUL BERDASARKAN HARI & JAM YANG 100% AKURAT ---
     const namaHariUrut = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
     savedMatkul.sort((a, b) => {
         let indexA = namaHariUrut.indexOf(a.hari);
@@ -724,6 +783,9 @@ function deleteMatkul(id) {
 
 document.addEventListener("DOMContentLoaded", () => { 
     document.querySelectorAll('.fab').forEach(f => f.innerHTML = iPls);
+    getOrCreateFabBackdrop();
+    initRoutineSelectAll();
+
     document.querySelectorAll('.swatch').forEach(sw => { 
         sw.addEventListener('click', function(e) { 
             e.stopPropagation(); updateSwatchSelection(this.dataset.color); 
@@ -732,13 +794,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- FITUR TUTUP MODAL DENGAN KLIK DI LUAR ---
     window.addEventListener('click', function(e) {
-        // Daftar ID modal yang diizinkan untuk ditutup dengan klik luar
         const dismissibleModals = ['day-detail-modal']; 
         
         dismissibleModals.forEach(modalId => {
             const overlay = document.getElementById(modalId);
             if (overlay && e.target === overlay) {
-                // Jika elemen yang diklik adalah background gelap (overlay), BUKAN kotak putih di dalamnya
                 closeModal(modalId);
             }
         });
@@ -764,7 +824,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 introVid.onerror = hideIntro; 
             }
             
-            // Jaminan aplikasi jalan dalam 2 detik
             setTimeout(hideIntro, 2000); 
             
         } else {

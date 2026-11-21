@@ -35,6 +35,26 @@ jobs:
           npx cap init "Pola" "com.pola.tracker.v2" --web-dir=www
           npx cap add android
 
+      - name: Pasang Ikon Aplikasi Pola
+        run: |
+          npm install @capacitor/assets --save-dev
+          node -e '
+            (async () => {
+              const sharp = require("sharp");
+              await sharp("assets/icons/logo.png")
+                .resize(760, 760, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+                .extend({
+                  top: 132,
+                  bottom: 132,
+                  left: 132,
+                  right: 132,
+                  background: { r: 0, g: 0, b: 0, alpha: 0 }
+                })
+                .toFile("assets/icon-only.png");
+            })();
+          '
+          npx capacitor-assets generate --android --iconBackgroundColor '#FAF7F2' --iconBackgroundColorDark '#FAF7F2'
+
       - name: Tambahkan Izin Alarm & Notifikasi Android
         run: |
           node -e '

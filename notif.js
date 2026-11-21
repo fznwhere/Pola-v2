@@ -1,7 +1,11 @@
-// notif.js - Penjadwal Alarm Native Android untuk Pola. v2
+// notif.js - Penjadwal Alarm Native Android untuk Pola. v3
 
 const POLA_CHANNEL_ID = 'pola_jadwal_v2';
-const POLA_SOUND_NAME = 'pola_notif'; // Nama file di assets/sounds/ tanpa ekstensi .mp3
+const POLA_SALAT_CUSTOM_CHANNEL_ID = 'pola_salat_custom_v1';
+const POLA_SALAT_DEFAULT_CHANNEL_ID = 'pola_salat_default_v1';
+
+const POLA_SOUND_NAME = 'pola_notif'; // Nama file di res/raw/ tanpa ekstensi .mp3
+const POLA_SALAT_SOUND_NAME = 'pola_notif'; // Ganti ke 'pola_salat' jika nanti menambah file pola_salat.mp3 saat build APK baru
 
 function stringToInt32(str) {
   let hash = 0;
@@ -20,15 +24,48 @@ function getLocalNotificationsPlugin() {
     : null;
 }
 
+function getActiveSalatChannelId() {
+  const cfg =
+    typeof getSalatSoundConfig === 'function'
+      ? getSalatSoundConfig()
+      : { type: 'preset_adzan', name: 'Nada Adzan Lembut' };
+
+  return cfg.type === 'default'
+    ? POLA_SALAT_DEFAULT_CHANNEL_ID
+    : POLA_SALAT_CUSTOM_CHANNEL_ID;
+}
+
 async function ensurePolaNotificationChannel(LocalNotifications) {
   try {
     await LocalNotifications.deleteChannel({ id: 'pola_jadwal_v1' }).catch(() => {});
 
+    // Channel jadwal umum (kuliah, tugas, acara, rutinitas)
     await LocalNotifications.createChannel({
       id: POLA_CHANNEL_ID,
       name: 'Pengingat Jadwal Pola',
-      description: 'Notifikasi jadwal salat, kuliah, rutinitas, dan tugas',
+      description: 'Notifikasi jadwal kuliah, rutinitas, acara, dan tugas',
       sound: POLA_SOUND_NAME,
+      importance: 5,
+      visibility: 1,
+      vibration: true
+    });
+
+    // Channel khusus jadwal salat (nada kustom / adzan)
+    await LocalNotifications.createChannel({
+      id: POLA_SALAT_CUSTOM_CHANNEL_ID,
+      name: 'Pengingat Waktu Salat (Nada Khusus)',
+      description: 'Notifikasi waktu salat dengan nada pengingat khusus',
+      sound: POLA_SALAT_SOUND_NAME,
+      importance: 5,
+      visibility: 1,
+      vibration: true
+    });
+
+    // Channel khusus jadwal salat (mengikuti nada bawaan perangkat)
+    await LocalNotifications.createChannel({
+      id: POLA_SALAT_DEFAULT_CHANNEL_ID,
+      name: 'Pengingat Waktu Salat (Default Perangkat)',
+      description: 'Notifikasi waktu salat dengan nada standar perangkat',
       importance: 5,
       visibility: 1,
       vibration: true
@@ -50,39 +87,19 @@ function formatReminderLabel(item) {
   return item.remindUnit === 'hours' ? `${val} Jam Lagi` : `${val} Menit Lagi`;
 }
 
-// Ambil jadwal salat per tanggal (dengan cache agar hemat kuota & jalan offline)
+// Ambil jadwal salat sesuai lokasi GPS user (terhubung dengan cache bulanan script.js)
 async function getSalatForDate(targetDateObj, dateStr) {
-  const cacheKey = `nalaSalat_${dateStr}`;
-  let cached = JSON.parse(localStorage.getItem(cacheKey));
-  if (cached) return cached;
-
-  const dd = String(targetDateObj.getDate()).padStart(2, '0');
-  const mm = String(targetDateObj.getMonth() + 1).padStart(2, '0');
-  const yyyy = targetDateObj.getFullYear();
-
-  try {
-    const res = await fetch(
-      `https://api.aladhan.com/v1/timingsByCity/${dd}-${mm}-${yyyy}?city=Yogyakarta&country=Indonesia&method=11`
-    );
-    const t = (await res.json()).data.timings;
-    cached = [
-      { name: 'Subuh', time: t.Fajr.slice(0, 5) },
-      { name: 'Zuhur', time: t.Dhuhr.slice(0, 5) },
-      { name: 'Asar', time: t.Asr.slice(0, 5) },
-      { name: 'Maghrib', time: t.Maghrib.slice(0, 5) },
-      { name: 'Isya', time: t.Isha.slice(0, 5) }
-    ];
-    localStorage.setItem(cacheKey, JSON.stringify(cached));
-    return cached;
-  } catch (e) {
-    return [
-      { name: 'Subuh', time: '04:30' },
-      { name: 'Zuhur', time: '11:45' },
-      { name: 'Asar', time: '15:00' },
-      { name: 'Maghrib', time: '17:45' },
-      { name: 'Isya', time: '19:00' }
-    ];
+  if (typeof fetchSalatTimingsForDate === 'function') {
+    return await fetchSalatTimingsForDate(targetDateObj, dateStr);
   }
+
+  return [
+    { name: 'Subuh', time: '04:15' },
+    { name: 'Zuhur', time: '11:40' },
+    { name: 'Asar', time: '15:00' },
+    { name: 'Maghrib', time: '17:45' },
+    { name: 'Isya', time: '18:55' }
+  ];
 }
 
 async function getSchedulesForDate(targetDateObj) {
@@ -90,13 +107,19 @@ async function getSchedulesForDate(targetDateObj) {
   const dayName = namaHari[targetDateObj.getDay()];
   let items = [];
 
-  const savedMatkul = JSON.parse(localStorage.getItem('nalaMatkul')) || [];
+  const savedMatkul =
+    typeof getActiveMatkulList === 'function'
+      ? getActiveMatkulList()
+      : JSON.parse(localStorage.getItem('nalaMatkul')) || [];
   const overrides = JSON.parse(localStorage.getItem('nalaOverrides')) || [];
   const savedTasks = JSON.parse(localStorage.getItem('nalaTasks')) || [];
   const savedRoutines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
-  const isHoliday = liburNasional[dateStr] || isUserHoliday(dateStr);
+  const isHoliday =
+    typeof getHolidayInfo === 'function'
+      ? getHolidayInfo(dateStr)
+      : isUserHoliday(dateStr);
 
-  // 1. Kuliah
+  // 1. Kuliah (hanya semester aktif)
   let matkuls = savedMatkul.filter((m) => m.hari === dayName);
   if (dayName === 'Minggu' || isHoliday) matkuls = [];
   matkuls = matkuls.filter(
@@ -159,8 +182,14 @@ async function getSchedulesForDate(targetDateObj) {
       }
     });
 
-  // 4. Waktu Salat
+  // 4. Waktu Salat (mengikuti lokasi terkini)
+  const loc =
+    typeof getSavedCoordinates === 'function'
+      ? getSavedCoordinates()
+      : { city: 'Yogyakarta' };
+  const cityLabel = loc && loc.city ? `Wilayah ${loc.city}` : '';
   const salatList = await getSalatForDate(targetDateObj, dateStr);
+
   salatList.forEach((s) => {
     if (!isDismissed('salat', s.name, dateStr)) {
       items.push({
@@ -168,7 +197,7 @@ async function getSchedulesForDate(targetDateObj) {
         name: `Salat ${s.name}`,
         category: 'Salat',
         time: s.time,
-        extra: 'Wilayah Yogyakarta',
+        extra: cityLabel,
         remindVal: null,
         remindUnit: 'minutes'
       });
@@ -187,7 +216,6 @@ function buildPendingTaskCountdownNotifications(now) {
   let results = [];
   if (pendingTasks.length === 0) return results;
 
-  // Jadwalkan pengingat otomatis harian (pukul 08:00 pagi) untuk 8 hari ke depan (hari ini s/d +7)
   for (let offset = 0; offset <= 7; offset++) {
     const checkDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, 8, 0, 0, 0);
     if (checkDate.getTime() <= Date.now()) continue;
@@ -204,9 +232,7 @@ function buildPendingTaskCountdownNotifications(now) {
 
       const diffDays = Math.round((deadlineDayStart - checkDayStart) / (1000 * 60 * 60 * 24));
 
-      // Aktif otomatis dari H-7 sampai Hari H (0)
       if (diffDays >= 0 && diffDays <= 7) {
-        // Pada Hari H, hanya kirim pengingat pagi jika jam deadline >= 10:00 agar tidak bertumpuk dengan alarm pagi
         if (diffDays === 0 && t.time) {
           const [dHour] = t.time.split(':').map(Number);
           if (!isNaN(dHour) && dHour < 10) return;
@@ -228,6 +254,7 @@ function buildPendingTaskCountdownNotifications(now) {
           sound: POLA_SOUND_NAME,
           smallIcon: 'ic_stat_pola',
           iconColor: '#C85A32',
+          extra: { type: 'task_countdown' },
           schedule: { at: checkDate, allowWhileIdle: true }
         });
       }
@@ -256,6 +283,14 @@ async function syncAndroidAlarms() {
   const daysToSchedule = [now, tomorrow];
   let notificationsToSchedule = [];
 
+  const salatChannelId = getActiveSalatChannelId();
+  const salatSoundCfg =
+    typeof getSalatSoundConfig === 'function'
+      ? getSalatSoundConfig()
+      : { type: 'preset_adzan' };
+  const salatNativeSound =
+    salatSoundCfg.type === 'default' ? undefined : POLA_SALAT_SOUND_NAME;
+
   for (const dayObj of daysToSchedule) {
     const { dateStr, items } = await getSchedulesForDate(dayObj);
 
@@ -274,56 +309,66 @@ async function syncAndroidAlarms() {
       );
       const pre5Date = new Date(exactDate.getTime() - 5 * 60 * 1000);
       const detail = item.extra ? ` (${item.extra})` : '';
+      const isSalat = item.category === 'Salat';
 
-      // Alarm Opsional Pengguna (jika diatur & bukan 5 menit agar tidak ganda)
+      const targetChannel = isSalat ? salatChannelId : POLA_CHANNEL_ID;
+      const targetSound = isSalat ? salatNativeSound : POLA_SOUND_NAME;
+      const extraMeta = { type: isSalat ? 'salat' : 'schedule', uid: item.uid };
+
+      // Alarm Opsional Pengguna
       const extraMins = getExtraReminderMinutes(item);
       if (extraMins > 0 && extraMins !== 5) {
         const customDate = new Date(exactDate.getTime() - extraMins * 60 * 1000);
         if (customDate.getTime() > Date.now()) {
-          notificationsToSchedule.push({
+          const notifObj = {
             id: stringToInt32(`${dateStr}_${item.uid}_custom_${extraMins}`),
             title: `⏰ ${formatReminderLabel(item)}: ${item.name}`,
             body: `Mulai pukul ${item.time}${detail} • ${item.category}`,
-            channelId: POLA_CHANNEL_ID,
-            sound: POLA_SOUND_NAME,
+            channelId: targetChannel,
             smallIcon: 'ic_stat_pola',
             iconColor: '#C85A32',
+            extra: extraMeta,
             schedule: { at: customDate, allowWhileIdle: true }
-          });
+          };
+          if (targetSound) notifObj.sound = targetSound;
+          notificationsToSchedule.push(notifObj);
         }
       }
 
       // Alarm Wajib 1: 5 Menit Sebelum
       if (pre5Date.getTime() > Date.now()) {
-        notificationsToSchedule.push({
+        const notifObj = {
           id: stringToInt32(`${dateStr}_${item.uid}_pre5`),
           title: `⏳ 5 Menit Lagi: ${item.name}`,
           body: `Mulai pukul ${item.time}${detail} • ${item.category}`,
-          channelId: POLA_CHANNEL_ID,
-          sound: POLA_SOUND_NAME,
+          channelId: targetChannel,
           smallIcon: 'ic_stat_pola',
           iconColor: '#C85A32',
+          extra: extraMeta,
           schedule: { at: pre5Date, allowWhileIdle: true }
-        });
+        };
+        if (targetSound) notifObj.sound = targetSound;
+        notificationsToSchedule.push(notifObj);
       }
 
       // Alarm Wajib 2: Tepat Waktu
       if (exactDate.getTime() > Date.now()) {
-        notificationsToSchedule.push({
+        const notifObj = {
           id: stringToInt32(`${dateStr}_${item.uid}_now`),
           title: `🔔 Sekarang: ${item.name}`,
           body: `Jadwal pukul ${item.time}${detail}`,
-          channelId: POLA_CHANNEL_ID,
-          sound: POLA_SOUND_NAME,
+          channelId: targetChannel,
           smallIcon: 'ic_stat_pola',
           iconColor: '#C85A32',
+          extra: extraMeta,
           schedule: { at: exactDate, allowWhileIdle: true }
-        });
+        };
+        if (targetSound) notifObj.sound = targetSound;
+        notificationsToSchedule.push(notifObj);
       }
     });
   }
 
-  // Tambahkan pengingat otomatis H-7 sampai Hari H untuk Tugas yang belum selesai
   const taskCountdownNotifs = buildPendingTaskCountdownNotifications(now);
   notificationsToSchedule.push(...taskCountdownNotifs);
 
@@ -343,6 +388,23 @@ if (typeof refreshAllViews === 'function') {
 document.addEventListener('DOMContentLoaded', async () => {
   const LocalNotifications = getLocalNotificationsPlugin();
   if (!LocalNotifications) return;
+
+  // Putar suara khusus salat saat pengingat masuk di dalam aplikasi
+  LocalNotifications.addListener('localNotificationReceived', (notification) => {
+    const isSalatNotif =
+      notification?.extra?.type === 'salat' ||
+      (notification?.title && notification.title.includes('Salat '));
+    if (isSalatNotif && typeof window.playSalatReminderSound === 'function') {
+      window.playSalatReminderSound(false);
+    }
+  });
+
+  // Hentikan pemutaran audio saat pengguna mengetuk notifikasi
+  LocalNotifications.addListener('localNotificationActionPerformed', () => {
+    if (typeof window.stopSalatReminderSound === 'function') {
+      window.stopSalatReminderSound();
+    }
+  });
 
   const perm = await LocalNotifications.requestPermissions();
   if (perm.display === 'granted') {

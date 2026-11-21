@@ -14,53 +14,43 @@
         <video id="intro-video" src="assets/media/intro.mp4" autoplay muted playsinline></video>
     </div>
 
+    <!-- EFEK BLUR PROGRESIF SAAT GESER -->
+    <div class="drawer-blur-backdrop" id="drawer-blur-backdrop"></div>
+
     <!-- HALAMAN GESER KIRI FULL-SCREEN ALA GEMINI -->
     <aside class="side-drawer" id="side-drawer" aria-hidden="true">
         <div class="drawer-header">
-            <div>
-                <h2 class="drawer-brand">Pola<span class="brand-dot">.</span></h2>
-                <span class="drawer-subtitle" id="drawer-section-label">Data Rutinitas</span>
-            </div>
-            <button class="drawer-close-btn" onclick="closeSideDrawer()" aria-label="Kembali ke Beranda">
-                <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="9 18 15 12 9 6"></polyline>
-                </svg>
-            </button>
+            <h2 class="brand-title">Pola<span class="brand-dot">.</span></h2>
+            <p class="drawer-subtitle" id="drawer-section-label">Rutinitas</p>
         </div>
 
-        <div class="drawer-scroll-area" id="drawer-scroll-area">
-            <div id="drawer-content-list"></div>
-
-            <div class="drawer-bottom-menu">
-                <span class="drawer-menu-heading">Lihat Data Lainnya</span>
-                <button class="drawer-option-btn active" id="dopt-rutinitas" onclick="switchDrawerTab('Rutinitas')">
-                    <span>Data Rutinitas</span>
+        <div class="drawer-top-selector">
+            <span class="drawer-menu-heading">Data</span>
+            <div class="drawer-options-row">
+                <button class="drawer-option-pill active" id="dopt-rutinitas" onclick="switchDrawerTab('Rutinitas')">
+                    <span>Rutinitas</span>
                     <small id="dcount-rutinitas">0</small>
                 </button>
-                <button class="drawer-option-btn" id="dopt-acara" onclick="switchDrawerTab('Acara')">
-                    <span>Data Acara</span>
+                <button class="drawer-option-pill" id="dopt-acara" onclick="switchDrawerTab('Acara')">
+                    <span>Acara</span>
                     <small id="dcount-acara">0</small>
                 </button>
-                <button class="drawer-option-btn" id="dopt-libur" onclick="switchDrawerTab('Libur')">
-                    <span>Data Hari Libur</span>
+                <button class="drawer-option-pill" id="dopt-libur" onclick="switchDrawerTab('Libur')">
+                    <span>Hari Libur</span>
                     <small id="dcount-libur">0</small>
                 </button>
             </div>
         </div>
+
+        <div class="drawer-scroll-area" id="drawer-scroll-area">
+            <div id="drawer-content-list"></div>
+        </div>
     </aside>
 
     <div class="app-container">
-        <header class="beranda-header">
-            <button class="drawer-trigger-btn" onclick="openSideDrawer()" aria-label="Buka panel arsip">
-                <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round">
-                    <line x1="4" y1="9" x2="20" y2="9"></line>
-                    <line x1="4" y1="15" x2="15" y2="15"></line>
-                </svg>
-            </button>
-            <div>
-                <h1 class="brand-title">Pola<span class="brand-dot">.</span></h1>
-                <p>Hari Ini</p>
-            </div>
+        <header>
+            <h1 class="brand-title">Pola<span class="brand-dot">.</span></h1>
+            <p>Hari Ini</p>
         </header>
         
         <div id="schedule-list"></div>

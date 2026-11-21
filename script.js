@@ -25,7 +25,7 @@ const iRom = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${st
 const iPls = `<svg viewBox="0 0 24 24" width="28" height="28" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
 const iDel = `<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="${strk}" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
 
-// --- CUSTOM DIALOG BERTEMA POLA (PENGGANTI ALERT & CONFIRM) ---
+// --- CUSTOM DIALOG BERTEMA POLA ---
 function ensurePolaDialogExists() {
     if (document.getElementById('pola-dialog-overlay')) return;
     const overlay = document.createElement('div');
@@ -236,7 +236,49 @@ function showFabAfterModal() {
     }
 }
 
-// --- PANEL GESER KIRI FULL-SCREEN (BERANDA) ---
+// --- EFEK BLUR PROGRESIF SAAT GESER ---
+function getOrCreateDrawerBlurBackdrop() {
+    let backdrop = document.getElementById('drawer-blur-backdrop');
+    if (!backdrop) {
+        backdrop = document.createElement('div');
+        backdrop.id = 'drawer-blur-backdrop';
+        backdrop.className = 'drawer-blur-backdrop';
+        document.body.appendChild(backdrop);
+    }
+    return backdrop;
+}
+
+function setDrawerBlurProgress(progress) {
+    const backdrop = getOrCreateDrawerBlurBackdrop();
+    const clamped = Math.max(0, Math.min(1, progress));
+    if (clamped <= 0) {
+        backdrop.style.transition = '';
+        backdrop.style.visibility = '';
+        backdrop.style.backgroundColor = '';
+        backdrop.style.backdropFilter = '';
+        backdrop.style.webkitBackdropFilter = '';
+        backdrop.classList.remove('show');
+    } else {
+        backdrop.style.visibility = 'visible';
+        const blurPx = (clamped * 12).toFixed(1);
+        const alpha = (clamped * 0.28).toFixed(3);
+        backdrop.style.backgroundColor = `rgba(45, 42, 38, ${alpha})`;
+        backdrop.style.backdropFilter = `blur(${blurPx}px)`;
+        backdrop.style.webkitBackdropFilter = `blur(${blurPx}px)`;
+    }
+}
+
+function finalizeDrawerBlur(isOpen) {
+    const backdrop = getOrCreateDrawerBlurBackdrop();
+    backdrop.style.transition = '';
+    backdrop.style.visibility = '';
+    backdrop.style.backgroundColor = '';
+    backdrop.style.backdropFilter = '';
+    backdrop.style.webkitBackdropFilter = '';
+    backdrop.classList.toggle('show', isOpen);
+}
+
+// --- HALAMAN GESER KIRI FULL-SCREEN (BERANDA) ---
 function openSideDrawer() {
     const drawer = document.getElementById('side-drawer');
     if (!drawer) return;
@@ -244,6 +286,7 @@ function openSideDrawer() {
     drawer.style.transform = '';
     drawer.classList.add('open');
     drawer.setAttribute('aria-hidden', 'false');
+    finalizeDrawerBlur(true);
     hideFabForModal();
     renderSideDrawerContent();
 }
@@ -255,6 +298,7 @@ function closeSideDrawer() {
     drawer.style.transform = '';
     drawer.classList.remove('open');
     drawer.setAttribute('aria-hidden', 'true');
+    finalizeDrawerBlur(false);
     const insertModal = document.getElementById('insert-modal');
     if (!insertModal || insertModal.style.display !== 'flex') {
         showFabAfterModal();
@@ -293,10 +337,10 @@ function renderSideDrawerContent() {
     today.setHours(0, 0, 0, 0);
 
     if (currentDrawerTab === 'Rutinitas') {
-        if (labelEl) labelEl.innerText = 'Data Rutinitas';
+        if (labelEl) labelEl.innerText = 'Rutinitas';
         const routines = JSON.parse(localStorage.getItem('nalaRoutines')) || [];
         if (routines.length === 0) {
-            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada data rutinitas.</p>';
+            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada rutinitas.</p>';
             return;
         }
         let html = '<div class="drawer-sub-heading">Jadwal Rutin Aktif</div>';
@@ -324,7 +368,7 @@ function renderSideDrawerContent() {
         });
         container.innerHTML = html;
     } else if (currentDrawerTab === 'Acara') {
-        if (labelEl) labelEl.innerText = 'Data Acara';
+        if (labelEl) labelEl.innerText = 'Acara';
         const tasks = JSON.parse(localStorage.getItem('nalaTasks')) || [];
         const acaras = tasks.filter((t) => t.category === 'Acara');
 
@@ -343,7 +387,7 @@ function renderSideDrawerContent() {
         pastAcaras.sort((a, b) => b.date.localeCompare(a.date));
 
         if (acaras.length === 0) {
-            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada data acara.</p>';
+            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada acara.</p>';
             return;
         }
 
@@ -391,11 +435,11 @@ function renderSideDrawerContent() {
 
         container.innerHTML = html;
     } else if (currentDrawerTab === 'Libur') {
-        if (labelEl) labelEl.innerText = 'Data Hari Libur';
+        if (labelEl) labelEl.innerText = 'Hari Libur';
         const libur = JSON.parse(localStorage.getItem('nalaLibur')) || [];
 
         if (libur.length === 0) {
-            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada jadwal libur khusus.</p>';
+            container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center; margin:28px 0;">Belum ada jadwal hari libur.</p>';
             return;
         }
 
@@ -442,14 +486,14 @@ function renderSideDrawerContent() {
 
         let html = '<div class="drawer-sub-heading">Akan Datang & Berlangsung</div>';
         if (upcomingLibur.length === 0) {
-            html += '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">Tidak ada jadwal libur mendatang.</p>';
+            html += '<p style="color:var(--text-muted); font-size:13px; margin-bottom:14px;">Tidak ada jadwal hari libur mendatang.</p>';
         } else {
             upcomingLibur.forEach((l) => { html += buildLiburCard(l, false); });
         }
 
         html += '<div class="drawer-sub-heading">Sudah Terlewat</div>';
         if (pastLibur.length === 0) {
-            html += '<p style="color:var(--text-muted); font-size:13px;">Belum ada jadwal libur yang terlewat.</p>';
+            html += '<p style="color:var(--text-muted); font-size:13px;">Belum ada jadwal hari libur yang terlewat.</p>';
         } else {
             pastLibur.forEach((l) => { html += buildLiburCard(l, true); });
         }
@@ -462,6 +506,7 @@ function initSideDrawerGestures() {
     const drawer = document.getElementById('side-drawer');
     if (!drawer) return;
 
+    const backdrop = getOrCreateDrawerBlurBackdrop();
     let startX = 0;
     let startY = 0;
     let currentX = 0;
@@ -501,6 +546,7 @@ function initSideDrawerGestures() {
             if (isDragging) {
                 drawer.style.transition = 'none';
                 drawer.style.visibility = 'visible';
+                backdrop.style.transition = 'none';
                 if (!startedOpen) renderSideDrawerContent();
             }
         }
@@ -511,6 +557,7 @@ function initSideDrawerGestures() {
         progress = Math.max(0, Math.min(1, progress));
 
         drawer.style.transform = `translate(${-150 + progress * 100}%, 0)`;
+        setDrawerBlurProgress(progress);
     }, { passive: true });
 
     document.addEventListener('touchend', () => {
@@ -530,32 +577,18 @@ function initSideDrawerGestures() {
     });
 }
 
-// --- PANEL GESER KANAN FULL-SCREEN (SEMESTER MATKUL) ---
+// --- HALAMAN GESER KANAN FULL-SCREEN (SEMESTER MATKUL) ---
 function setupMatkulSemesterUI() {
     const matkulListEl = document.getElementById('matkul-list');
     if (!matkulListEl) return;
 
     ensureSemesterInitialized();
+    getOrCreateDrawerBlurBackdrop();
 
     const headerEl = document.querySelector('header');
-    if (headerEl && !document.getElementById('semester-trigger-btn')) {
-        headerEl.classList.add('matkul-header');
+    if (headerEl) {
         const pEl = headerEl.querySelector('p');
         if (pEl) pEl.id = 'active-semester-subtitle';
-
-        const btn = document.createElement('button');
-        btn.id = 'semester-trigger-btn';
-        btn.className = 'semester-trigger-btn';
-        btn.setAttribute('aria-label', 'Kelola Semester Kuliah');
-        btn.onclick = openRightSemesterDrawer;
-        btn.innerHTML = `
-            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-                <polyline points="2 17 12 22 22 17"></polyline>
-                <polyline points="2 12 12 17 22 12"></polyline>
-            </svg>
-        `;
-        headerEl.appendChild(btn);
     }
 
     if (!document.getElementById('right-semester-drawer')) {
@@ -565,21 +598,14 @@ function setupMatkulSemesterUI() {
         aside.setAttribute('aria-hidden', 'true');
         aside.innerHTML = `
             <div class="drawer-header">
-                <div>
-                    <h2 class="drawer-brand">Semester<span class="brand-dot">.</span></h2>
-                    <span class="drawer-subtitle">Pilih atau Tambah Jadwal Semester</span>
-                </div>
-                <button class="drawer-close-btn" onclick="closeRightSemesterDrawer()" aria-label="Kembali ke Jadwal Kuliah">
-                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="15 18 9 12 15 6"></polyline>
-                    </svg>
-                </button>
+                <h2 class="brand-title">Pola<span class="brand-dot">.</span></h2>
+                <p class="drawer-subtitle">Jadwal Semester</p>
             </div>
             <div class="drawer-scroll-area">
-                <div class="drawer-sub-heading">Daftar Semester Tersimpan</div>
+                <div class="drawer-sub-heading">Daftar Semester</div>
                 <div id="semester-list-container"></div>
                 <div class="drawer-bottom-menu">
-                    <span class="drawer-menu-heading">Opsi Semester</span>
+                    <span class="drawer-menu-heading">Tambah</span>
                     <button class="drawer-option-btn primary-action" onclick="openNewSemesterModal()">+ Tambah Semester Baru</button>
                 </div>
             </div>
@@ -624,6 +650,7 @@ function openRightSemesterDrawer() {
     drawer.style.transform = '';
     drawer.classList.add('open');
     drawer.setAttribute('aria-hidden', 'false');
+    finalizeDrawerBlur(true);
     hideFabForModal();
     renderSemesterDrawerList();
 }
@@ -635,6 +662,7 @@ function closeRightSemesterDrawer() {
     drawer.style.transform = '';
     drawer.classList.remove('open');
     drawer.setAttribute('aria-hidden', 'true');
+    finalizeDrawerBlur(false);
     const matkulModal = document.getElementById('matkul-modal');
     if (!matkulModal || matkulModal.style.display !== 'flex') {
         showFabAfterModal();
@@ -657,7 +685,7 @@ function renderSemesterDrawerList() {
                 <div class="semester-card-top">
                     <div>
                         <div class="semester-card-title">${sem.name}</div>
-                        <div class="semester-card-meta">${count} Mata Kuliah tersimpan</div>
+                        <div class="semester-card-meta">${count} Mata Kuliah</div>
                     </div>
                     ${isActive ? '<span class="semester-badge-active">Aktif</span>' : ''}
                 </div>
@@ -738,7 +766,7 @@ async function saveSemesterForm() {
 async function deleteSemesterItem(semId) {
     const { semesters, activeId } = ensureSemesterInitialized();
     if (semesters.length <= 1) {
-        await polaAlert('Minimal harus ada satu semester yang tersimpan.');
+        await polaAlert('Minimal harus ada satu semester.');
         return;
     }
 
@@ -764,6 +792,7 @@ function initRightDrawerGestures() {
     const drawer = document.getElementById('right-semester-drawer');
     if (!drawer) return;
 
+    const backdrop = getOrCreateDrawerBlurBackdrop();
     let startX = 0;
     let startY = 0;
     let currentX = 0;
@@ -799,12 +828,13 @@ function initRightDrawerGestures() {
             if (Math.abs(dx) < 14 && Math.abs(dy) < 14) return;
             gestureDecided = true;
             if (Math.abs(dx) > Math.abs(dy) * 1.35) {
-                if (!startedOpen && dx < 0) isDragging = true; // Geser ke kiri membuka dari kanan
-                if (startedOpen && dx > 0) isDragging = true; // Geser ke kanan menutup ke kanan
+                if (!startedOpen && dx < 0) isDragging = true;
+                if (startedOpen && dx > 0) isDragging = true;
             }
             if (isDragging) {
                 drawer.style.transition = 'none';
                 drawer.style.visibility = 'visible';
+                backdrop.style.transition = 'none';
                 if (!startedOpen) renderSemesterDrawerList();
             }
         }
@@ -815,6 +845,7 @@ function initRightDrawerGestures() {
         progress = Math.max(0, Math.min(1, progress));
 
         drawer.style.transform = `translate(${50 - progress * 100}%, 0)`;
+        setDrawerBlurProgress(progress);
     }, { passive: true });
 
     document.addEventListener('touchend', () => {

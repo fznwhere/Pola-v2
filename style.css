@@ -49,45 +49,6 @@ body { background-color: var(--bg-main); color: var(--text-main); display: flex;
 .app-container { width: 100%; max-width: 480px; min-height: 100vh; padding: 20px; padding-bottom: 100px; }
 
 header { text-align: center; margin-bottom: 25px; position: relative; }
-.beranda-header, .matkul-header { display: flex; justify-content: center; align-items: center; }
-
-.drawer-trigger-btn {
-    position: absolute;
-    left: 0;
-    top: 4px;
-    width: 38px;
-    height: 38px;
-    border-radius: 10px;
-    border: 1px solid var(--border-line);
-    background-color: var(--bg-card);
-    color: var(--text-main);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    box-shadow: 0 2px 6px rgba(45, 42, 38, 0.04);
-    transition: transform 0.15s ease;
-}
-.drawer-trigger-btn:active { transform: scale(0.92); }
-
-.semester-trigger-btn {
-    position: absolute;
-    right: 0;
-    top: 4px;
-    width: 38px;
-    height: 38px;
-    border-radius: 10px;
-    border: 1px solid var(--border-line);
-    background-color: var(--bg-card);
-    color: var(--text-main);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    box-shadow: 0 2px 6px rgba(45, 42, 38, 0.04);
-    transition: transform 0.15s ease;
-}
-.semester-trigger-btn:active { transform: scale(0.92); }
 
 .brand-title { font-family: var(--font-logo); font-size: 32px; font-weight: 400; margin-bottom: 5px; color: var(--text-main); letter-spacing: 0.5px; line-height: 1; }
 .brand-dot { font-family: var(--font-logo); color: var(--btn-primary); }
@@ -100,6 +61,25 @@ header p { color: var(--text-muted); font-size: 14px; font-weight: 500; margin-t
 .section-title { font-size: 16px; font-weight: 700; margin-bottom: 12px; color: var(--text-main); }
 .svg-icon { vertical-align: text-bottom; width: 14px; height: 14px; margin-right: 4px; }
 
+/* --- EFEK BLUR PROGRESIF SAAT GESER HALAMAN --- */
+.drawer-blur-backdrop {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(45, 42, 38, 0);
+    backdrop-filter: blur(0px);
+    -webkit-backdrop-filter: blur(0px);
+    pointer-events: none;
+    visibility: hidden;
+    transition: backdrop-filter 0.32s ease, -webkit-backdrop-filter 0.32s ease, background-color 0.32s ease, visibility 0.32s ease;
+    z-index: 25;
+}
+.drawer-blur-backdrop.show {
+    visibility: visible;
+    background-color: rgba(45, 42, 38, 0.28);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
 /* --- HALAMAN GESER FULL-SCREEN (KIRI & KANAN) --- */
 .side-drawer,
 .right-drawer {
@@ -109,12 +89,12 @@ header p { color: var(--text-muted); font-size: 14px; font-weight: 500; margin-t
     width: 100%;
     max-width: 480px;
     height: 100dvh;
-    background-color: var(--bg-main);
+    background-color: rgba(253, 251, 247, 0.96);
     transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1), visibility 0.32s ease;
     z-index: 26;
     display: flex;
     flex-direction: column;
-    padding: 20px;
+    padding: 20px 20px 0 20px;
     visibility: hidden;
 }
 
@@ -135,45 +115,61 @@ header p { color: var(--text-muted); font-size: 14px; font-weight: 500; margin-t
 }
 
 .drawer-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+    text-align: center;
     padding-bottom: 14px;
     border-bottom: 1px solid var(--border-line);
     flex-shrink: 0;
 }
-.drawer-brand {
-    font-family: var(--font-logo);
-    font-size: 26px;
-    font-weight: 400;
-    line-height: 1;
-    color: var(--text-main);
-}
 .drawer-subtitle {
-    display: block;
-    font-size: 12px;
     color: var(--text-muted);
-    font-weight: 600;
-    margin-top: 4px;
+    font-size: 14px;
+    font-weight: 500;
+    margin-top: -2px;
 }
-.drawer-close-btn {
-    background: var(--bg-card);
-    border: 1px solid var(--border-line);
+
+/* --- PEMILIH DATA TETAP DI ATAS (TIDAK IKUT TERGULIR) --- */
+.drawer-top-selector {
+    padding: 14px 0 12px 0;
+    border-bottom: 1px dashed var(--border-line);
+    flex-shrink: 0;
+}
+.drawer-options-row {
+    display: flex;
+    gap: 8px;
+}
+.drawer-option-pill {
+    flex: 1;
+    background-color: var(--bg-card);
     color: var(--text-main);
-    width: 38px;
-    height: 38px;
+    border: 1px solid var(--border-line);
+    padding: 10px 8px;
     border-radius: 10px;
+    font-size: 13px;
+    font-weight: 700;
     display: flex;
     align-items: center;
     justify-content: center;
+    gap: 6px;
     cursor: pointer;
+    transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
 }
-.drawer-close-btn:active { transform: scale(0.92); }
+.drawer-option-pill:active { transform: scale(0.96); }
+.drawer-option-pill.active {
+    background-color: var(--text-main);
+    color: #FFFFFF;
+    border-color: var(--text-main);
+}
+.drawer-option-pill small {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    opacity: 0.75;
+}
 
 .drawer-scroll-area {
     flex: 1;
     overflow-y: auto;
-    padding-top: 16px;
+    padding-top: 14px;
     padding-bottom: 32px;
 }
 
@@ -189,22 +185,23 @@ header p { color: var(--text-muted); font-size: 14px; font-weight: 500; margin-t
     margin-top: 0;
 }
 
-/* --- OPSI GULIR BAWAH DI DALAM PANEL --- */
+/* --- BAGIAN TAMBAH DI PANEL SEMESTER --- */
 .drawer-bottom-menu {
-    margin-top: 26px;
-    padding-top: 18px;
+    margin-top: 22px;
+    padding-top: 16px;
     border-top: 1px dashed var(--border-line);
     display: flex;
     flex-direction: column;
     gap: 8px;
 }
 .drawer-menu-heading {
+    display: block;
     font-size: 11px;
     font-weight: 800;
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    margin-bottom: 2px;
+    margin-bottom: 6px;
 }
 .drawer-option-btn {
     width: 100%;
@@ -216,27 +213,15 @@ header p { color: var(--text-muted); font-size: 14px; font-weight: 500; margin-t
     font-size: 14px;
     font-weight: 700;
     display: flex;
-    justify-content: space-between;
+    justify-content: center;
     align-items: center;
     cursor: pointer;
-    transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+    transition: transform 0.15s ease;
 }
 .drawer-option-btn:active { transform: scale(0.98); }
-.drawer-option-btn.active {
-    background-color: var(--text-main);
-    color: #FFFFFF;
-    border-color: var(--text-main);
-}
-.drawer-option-btn small {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    font-weight: 700;
-    opacity: 0.75;
-}
 .drawer-option-btn.primary-action {
     border-color: var(--btn-primary);
     color: var(--btn-primary);
-    justify-content: center;
 }
 
 /* --- KARTU SEMESTER DI PANEL MATKUL --- */
